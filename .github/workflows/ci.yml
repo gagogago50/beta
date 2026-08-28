@@ -3,12 +3,21 @@ name: CI
 # Runs on every push and pull request, not only on tags: the upstream workflow
 # only fired on tag pushes, which let regressions reach a release build
 # unnoticed. Release artifacts are still produced for tags only.
+#
+# Scoped to this repository's own `main` branch so unrelated repositories in
+# the account never trigger these builds. `concurrency` cancels a superseded
+# run of THIS workflow (and only this one) if a newer commit lands.
 on:
   push:
-    branches: ['**']
+    branches: ['main']
     tags: ['v*']
   pull_request:
+    branches: ['main']
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
