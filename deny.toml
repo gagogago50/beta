@@ -1,0 +1,33 @@
+# License policy for the Rust dependency tree (F6).
+#
+# `cargo deny check licenses` reads this file. The goal is a clean candidate
+# for an open-source release: permissive licenses are accepted, copyleft
+# (GPL/AGPL/LGPL) is refused, and the source of truth for "can we publish this"
+# lives here so the CI enforces it on every push.
+[licenses]
+# Default action for a license not explicitly listed: fully deny (we want a
+# narrow, known allow-list rather than a default-allow bag).
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unlicense",
+    "0BSD",
+    "OpenSSL",
+]
+# Explicitly refuse copyleft-family licenses.
+deny = [
+    "GPL-2.0",
+    "GPL-3.0",
+    "LGPL-2.1",
+    "LGPL-3.0",
+    "AGPL-1.0",
+    "AGPL-3.0",
+    "MPL-2.0",
+]
+# Unlicensed crates break the "publishable" goal.
+unlicensed = "deny"
+confidence-threshold = 0.8

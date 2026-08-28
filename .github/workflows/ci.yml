@@ -93,11 +93,8 @@ jobs:
           cargo install cargo-deny --locked
       - name: Generate CycloneDX SBOM (Cargo)
         run: cargo cyclonedx --manifest-path native/Cargo.toml --output-format json
-      - name: License policy (Cargo)
-        run: >
-          cargo deny --manifest-path native/Cargo.toml check licenses
-          --allow-list MIT Apache-2.0 BSD-3-Clause BSD-2-Clause ISC Zlib Unlicense
-          --deny-license AGPL-3.0 GPL-2.0 GPL-3.0 LGPL-2.1 LGPL-3.0
+      - name: License policy (Cargo, from deny.toml)
+        run: cargo deny -c deny.toml check licenses
       - name: Upload SBOM
         uses: actions/upload-artifact@v4
         with:
