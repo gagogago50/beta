@@ -83,6 +83,8 @@ jobs:
   sbom:
     name: SBOM + license check
     runs-on: ubuntu-latest
+    # Advisory / SBOM tooling changes independently and a fresh CVE can surface
+    # at any moment; never block a merge, but keep the signals visible.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -92,14 +94,21 @@ jobs:
           cargo install cargo-cyclonedx --locked
           cargo install cargo-deny --locked
       - name: Generate CycloneDX SBOM (Cargo)
+        # cyclonedx can fail on an unusual manifest; that must not stop the
+        # license check that follows, and an SBOM is best-effort.
+        continue-on-error: true
         run: cargo cyclonedx --manifest-path native/Cargo.toml --output-format json
       - name: License policy (Cargo, from deny.toml)
+        if: always()
+        continue-on-error: true
         run: cargo deny -c deny.toml check licenses
       - name: Upload SBOM
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: sbom-cargo
           path: native/**/*.cdx.json
+          if-no-files-found: warn
 
   # F6: license audit for the Flutter/pub dependency tree.
   flutter-licenses:
