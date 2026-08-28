@@ -1,0 +1,212 @@
+name: CI
+
+# Runs on every push and pull request, not only on tags: the upstream workflow
+# only fired on tag pushes, which let regressions reach a release build
+# unnoticed. Release artifacts are still produced for tags only.
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Rust engine
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            native/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('native/Cargo.lock') }}
+
+      # cpal links against ALSA on the Linux host used for `cargo check`.
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
+      - name: Format
+        run: cargo fmt --manifest-path native/Cargo.toml -- --check
+
+      - name: Check
+        run: cargo check --locked --manifest-path native/Cargo.toml
+
+      # -D warnings applies to the tsclient crate only: the vendored
+      # tsclientlib/tsproto sources carry hundreds of upstream warnings that we
+      # do not want to fix in a fork, and `-p` keeps them out of the lint pass.
+      - name: Clippy (own crate, warnings are errors)
+        run: >
+          cargo clippy --locked --manifest-path native/Cargo.toml
+          -p tsclient -- -D warnings
+
+      - name: Test
+        run: cargo test --locked --manifest-path native/Cargo.toml -p tsclient
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    # Advisory database changes independently of the code: never block a merge
+    # on a freshly published advisory, but keep the signal visible.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install cargo-audit --locked
+      - run: cargo audit --file native/Cargo.lock
+
+  # F6: keep a CycloneDX SBOM and catch disallowed licenses. The policy denies
+  # copyleft (GPL/AGPL/LGPL) so a potential public fork stays license-clean;
+  # permissive (MIT/Apache/BSD/ISC/Zlib) is accepted. Drift is reported but
+  # never blocks a merge.
+  sbom:
+    name: SBOM + license check
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install SBOM / deny tools
+        run: |
+          cargo install cargo-cyclonedx --locked
+          cargo install cargo-deny --locked
+      - name: Generate CycloneDX SBOM (Cargo)
+        run: cargo cyclonedx --manifest-path native/Cargo.toml --output-format json
+      - name: License policy (Cargo)
+        run: >
+          cargo deny --manifest-path native/Cargo.toml check licenses
+          --allow-list MIT Apache-2.0 BSD-3-Clause BSD-2-Clause ISC Zlib Unlicense
+          --deny-license AGPL-3.0 GPL-2.0 GPL-3.0 LGPL-2.1 LGPL-3.0
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cargo
+          path: native/**/*.cdx.json
+
+  # F6: license audit for the Flutter/pub dependency tree.
+  flutter-licenses:
+    name: Flutter licenses
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.0'
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Verify no copyleft licenses
+        run: |
+          flutter pub deps --style=compact | grep -iE \
+            'gpl|agpl|lgpl|cc-by-sa' || echo "No copyleft licenses found"
+
+  secrets:
+    name: Secret-leak guard (B3)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run anti-leak scan
+        run: python3 tools/check_secrets.py
+
+  flutter:
+    name: Flutter app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.0'
+          channel: stable
+          cache: true
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, x86_64-linux-android
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            native/target
+          key: cargo-android-${{ runner.os }}-${{ hashFiles('native/Cargo.lock') }}
+
+      - name: Install NDK
+        id: ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26d
+
+      # libtsclient.so is gitignored: without this step the APK builds but
+      # crashes at runtime on DynamicLibrary.open.
+      - name: Build native libraries
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        run: python3 pre_build.py
+
+      - name: Pub get
+        run: flutter pub get
+
+      - name: Generate localizations
+        run: flutter gen-l10n
+
+      # Generated l10n files are committed: a diff here means someone edited an
+      # .arb without regenerating.
+      - name: Verify generated localizations are committed
+        run: git diff --exit-code lib/l10n/generated
+
+      - name: Format
+        run: dart format . --set-exit-if-changed
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+      - name: Build debug APK
+        run: flutter build apk --debug
+
+      # The debug APK is produced on every push/PR (the runner has >7 GB RAM,
+      # unlike the 2 GB dev sandbox). Always upload it so the developer can
+      # install it on a phone immediately, and keep it as a durable artifact
+      # even without a release tag.
+      - name: Upload debug APK (all pushes)
+        uses: actions/upload-artifact@v4
+        with:
+          name: nek0-debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+
+      - name: Build release APK
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: flutter build apk --release --split-per-abi
+
+      - name: Upload release artifacts
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: nek0-apk
+          path: |
+            build/app/outputs/flutter-apk/*.apk
+            android/app/src/main/jniLibs/native-build.sha256

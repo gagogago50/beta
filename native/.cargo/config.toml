@@ -1,0 +1,7 @@
+# Android NDK — cc crate and Cargo auto-detect toolchain from ANDROID_NDK_HOME.
+
+[target.aarch64-linux-android]
+rustflags = ["-C", "link-arg=-lc++_shared"]
+
+[target.x86_64-linux-android]
+rustflags = ["-C", "link-arg=-lc++_shared"]

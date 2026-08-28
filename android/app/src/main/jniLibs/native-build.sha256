@@ -1,0 +1,4 @@
+8dfbd800f0d4b8ff2b664b0e5012a4a5f08794668dccfaa29b8b1c2cdcdc18b3  android/app/src/main/jniLibs/arm64-v8a/libc++_shared.so
+7d112bca65612d2a966f744aaf1a39a509472c91f9d9398afd590eb5fcb15d31  android/app/src/main/jniLibs/arm64-v8a/libtsclient.so
+f7cb7a036a80133eab72811b78db734468f4b6ad2938a6d5577ff477d6c28914  android/app/src/main/jniLibs/x86_64/libc++_shared.so
+d3ff4c466499bc57aadefd6242a8c2228240cf7422d78f59611b26043450c353  android/app/src/main/jniLibs/x86_64/libtsclient.so
