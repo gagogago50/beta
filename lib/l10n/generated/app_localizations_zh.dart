@@ -674,4 +674,31 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get dismiss => '关闭';
+
+  @override
+  String get masterVolume => '主音量';
+
+  @override
+  String get channelInfo => '频道信息';
+
+  @override
+  String get bookmarkServer => '收藏此服务器';
+
+  @override
+  String get networkStats => '网络统计';
+
+  @override
+  String get refreshServer => '刷新服务器';
+
+  @override
+  String get noChannelInfo => '该频道没有主题';
+
+  @override
+  String get close => '关闭';
+
+  @override
+  String get alreadyBookmarked => '该服务器已在收藏中';
+
+  @override
+  String get serverBookmarked => '已收藏服务器';
 }

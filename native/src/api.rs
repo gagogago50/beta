@@ -1045,14 +1045,18 @@ fn build_output_stream() {
                                 }
                             }
 
-                            // Phase B: attenuate
+                            // Phase B: attenuate, then apply the master volume.
+                            // The master gain is read per mix frame (a benign
+                            // relaxed atomic load) so the whole app's loudness
+                            // follows one control.
                             let atten = if active > 0 {
                                 1.0 / (active as f32).sqrt()
                             } else {
                                 1.0
                             };
+                            let master = crate::master_volume_gain();
                             for s in &mut mix_buf {
-                                *s = (*s * atten).clamp(-32768.0, 32767.0) / 32768.0;
+                                *s = (*s * atten * master).clamp(-32768.0, 32767.0) / 32768.0;
                             }
 
                             *current_mix_buf.borrow_mut() = mix_buf;
@@ -2048,30 +2052,47 @@ async fn event_loop(
                                     frame
                                 };
                                 let mut guard = state_arc.lock();
+                                // Sequence number first: reading these fields must
+                                // not happen while the encoder is borrowed below,
+                                // and the closure must not capture `guard`.
+                                let seq = if whisper_on {
+                                    let s = guard.whisper_seq;
+                                    guard.whisper_seq = s.wrapping_add(1);
+                                    s
+                                } else {
+                                    let s = guard.audio_seq;
+                                    guard.audio_seq = s.wrapping_add(1);
+                                    s
+                                };
                                 if let Some(ref mut encoder) = guard.audio_encoder {
-                                    let mut opus_out = vec![0u8; 4000];
-                                    match encoder.encode(&gained, FRAME, &mut opus_out) {
-                                        Ok(len) => {
-                                            let seq = if whisper_on {
-                                                let s = guard.whisper_seq;
-                                                guard.whisper_seq = s.wrapping_add(1);
-                                                s
-                                            } else {
-                                                let s = guard.audio_seq;
-                                                guard.audio_seq = s.wrapping_add(1);
-                                                s
-                                            };
-                                            Some((seq, opus_out[..len].to_vec()))
-                                        }
-                                        Err(e) => {
-                                            log_error!(
-                                                "opus encode ERROR: {} (frame_len={})",
-                                                e,
-                                                gained.len()
-                                            );
-                                            None
-                                        }
+                                    // Reuse a thread-local Opus scratch instead of
+                                    // allocating a 4 kB Vec for every 20 ms frame
+                                    // (a real CPU/GC sink that warms the phone).
+                                    // The scratch lives outside the session guard,
+                                    // so it never competes for a borrow with the
+                                    // encoder; the closure only captures the
+                                    // encoder and the precomputed `seq`.
+                                    thread_local! {
+                                        static OPUS_SCRATCH: std::cell::RefCell<Vec<u8>> =
+                                            const { std::cell::RefCell::new(Vec::new()) };
                                     }
+                                    OPUS_SCRATCH.with(|c| {
+                                        let mut buf = c.borrow_mut();
+                                        if buf.len() < 4000 {
+                                            buf.resize(4000, 0);
+                                        }
+                                        match encoder.encode(&gained, FRAME, &mut buf) {
+                                            Ok(len) => Some((seq, buf[..len].to_vec())),
+                                            Err(e) => {
+                                                log_error!(
+                                                    "opus encode ERROR: {} (frame_len={})",
+                                                    e,
+                                                    gained.len()
+                                                );
+                                                None
+                                            }
+                                        }
+                                    })
                                 } else {
                                     guard.pcm_in.clear();
                                     None
@@ -3506,6 +3527,12 @@ pub extern "C" fn ts_set_mic_gain(conn_id: crate::ConnectionId, gain: f32) {
 /// under the client's user UID in the *global* [`CLIENT_VOLUMES`] table, so it
 /// survives reconnects and client ID reuse and is shared across servers (TS3
 /// UIDs are derived from the identity and are the same everywhere).
+/// Sets the app-wide output volume (dB, -20..+20). Shared by every server.
+#[no_mangle]
+pub extern "C" fn ts_set_master_volume(volume_db: f32) {
+    crate::set_master_volume_db(volume_db);
+}
+
 #[no_mangle]
 pub extern "C" fn ts_set_client_volume(
     conn_id: crate::ConnectionId,

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/widgets.dart';
 import 'package:flutter/services.dart' show SystemSound, SystemSoundType;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -473,6 +474,17 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
 
   final Map<int, _SessionRuntime> _rt = {};
 
+  // ─── Perf: throttle the highest-frequency state writes ─────────────
+  // The mic-level callback fires ~50×/s and the notification is a platform
+  // channel call; letting either hammer `state` (or the MethodChannel) was the
+  // main source of UI jank and CPU/heat on a real phone. These bounds keep the
+  // UI responsive and the cores cool without losing any visible signal.
+  static const _micLevelThrottle = Duration(milliseconds: 100);
+  static const _notifyThrottle = Duration(milliseconds: 600);
+  static const _maxDiagMessages = 40;
+  DateTime _lastMicLevelWrite = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime _lastNotification = DateTime.fromMillisecondsSinceEpoch(0);
+
   @override
   MultiServerState build() {
     ForegroundService.init();
@@ -701,7 +713,11 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
             final clients = (jsonDecode(clientsJson) as List)
                 .map((j) => TsClient.fromJson(j as Map<String, dynamic>))
                 .toList();
-            if (clients.isNotEmpty) {
+            // Only write to state when the roster actually changed: writing an
+            // identical list every 2s rebuilds the whole client list for
+            // nothing, which is a major source of jank on a real phone.
+            if (clients.isNotEmpty &&
+                !listEquals(clients, _stateOf(cid).clients)) {
               _setSession(cid, _stateOf(cid).copyWith(clients: clients));
             }
             _applySavedClientVolumes(cid);
@@ -1011,32 +1027,33 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
         break;
 
       case 'channels_updated':
-        final chJson = TsNative.getChannels(cid);
-        final clJson = TsNative.getClients(cid);
-        final newChannels = (jsonDecode(chJson) as List)
+        final st = _stateOf(cid);
+        final newChannels = (jsonDecode(TsNative.getChannels(cid)) as List)
             .map((j) => TsChannel.fromJson(j as Map<String, dynamic>))
             .toList();
-        final newClients = (jsonDecode(clJson) as List)
+        final newClients = (jsonDecode(TsNative.getClients(cid)) as List)
             .map((j) => TsClient.fromJson(j as Map<String, dynamic>))
             .toList();
-        _setSession(
-          cid,
-          _stateOf(cid).copyWith(channels: newChannels, clients: newClients),
-        );
-        _refreshNotification();
+        // Skip the write when nothing changed (the server sends "updated" for
+        // bookkeeping too); otherwise the tree/client list rebuilds needlessly.
+        if (!listEquals(newChannels, st.channels) ||
+            !listEquals(newClients, st.clients)) {
+          _setSession(
+            cid,
+            st.copyWith(channels: newChannels, clients: newClients),
+          );
+        }
         break;
 
       case 'diag':
         AppLog.d('engine', data['msg'] as String);
-        _setSession(
-          cid,
-          _stateOf(cid).copyWith(
-            diagMessages: [
-              ..._stateOf(cid).diagMessages,
-              data['msg'] as String,
-            ],
-          ),
-        );
+        // Bound the list: an unbounded grow would rebuild on every engine
+        // diagnostic (it is appended to the state on each one).
+        final diag = [..._stateOf(cid).diagMessages, data['msg'] as String];
+        if (diag.length > _maxDiagMessages) {
+          diag.removeRange(0, diag.length - _maxDiagMessages);
+        }
+        _setSession(cid, _stateOf(cid).copyWith(diagMessages: diag));
         break;
     }
   }
@@ -1069,6 +1086,23 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
     if (state.order.contains(cid)) {
       state = state.copyWith(selectedId: cid);
     }
+  }
+
+  /// The address of a session, for bookmarking the current server.
+  String runtimeAddress(int cid) => _rt[cid]?.address ?? '';
+
+  /// The channel the user is currently in (by name), for bookmarking.
+  String? runtimeChannel(int cid) {
+    final name = _currentChannelName(cid);
+    return name.isEmpty ? null : name;
+  }
+
+  /// Forces an immediate roster re-read for a session (e.g. a "refresh"
+  /// action) by clearing the reconcile watermark so the next poll re-fetches.
+  void refreshRoster(int cid) {
+    if (!_rt.containsKey(cid)) return;
+    _lastRosterRefresh = DateTime.fromMillisecondsSinceEpoch(0);
+    _startPolling();
   }
 
   void closeSession(int cid) {
@@ -2244,10 +2278,18 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
     if (cid == 0) return;
     _audioService = AudioService()..connectionId = cid;
     _audioService!.onMicLevel = (double rms) {
+      // Mic frames arrive ~50×/s; writing the level to state that often
+      // rebuilds the whole server screen and overheats the phone. The level is
+      // only shown on the mic-activity slider, so 10 updates/s is plenty —
+      // and only when the value actually moved by a perceptible amount.
       final micCid = _micConnectionId;
-      if (micCid != 0) {
-        _setSession(micCid, _stateOf(micCid).copyWith(micRms: rms));
-      }
+      if (micCid == 0) return;
+      final now = DateTime.now();
+      if (now.difference(_lastMicLevelWrite) < _micLevelThrottle) return;
+      final prev = _stateOf(micCid).micRms;
+      if ((rms - prev).abs() < 0.002) return;
+      _lastMicLevelWrite = now;
+      _setSession(micCid, _stateOf(micCid).copyWith(micRms: rms));
     };
     _audioService!.start();
   }
@@ -2288,6 +2330,17 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
   bool _notificationStarted = false;
 
   void _refreshNotification({bool? mic}) {
+    // The notification is a platform channel call; rapid callers (voice-active
+    // toggles every poll, mute/unmute taps) would otherwise serialize a flood.
+    // Coalesce to at most one update per ~600ms — the notification content only
+    // changes on meaningful transitions, so intermediate states are dropped.
+    final now = DateTime.now();
+    if (_notificationStarted &&
+        now.difference(_lastNotification) < _notifyThrottle) {
+      return;
+    }
+    _lastNotification = now;
+
     final connected = state.sessions.values.where((s) => s.connected).toList();
     if (connected.isEmpty) {
       _notificationStarted = false;
@@ -2713,6 +2766,49 @@ final tsSelectedProvider = Provider<TsSessionView>((ref) {
 final serverListProvider =
     NotifierProvider<ServerListNotifier, ServerListState>(
       ServerListNotifier.new,
+    );
+
+// ─── Master volume (app-wide output gain) ───────────────────────────
+
+class MasterVolumeState {
+  final double volumeDb;
+  const MasterVolumeState({this.volumeDb = 0.0});
+  MasterVolumeState copyWith({double? volumeDb}) =>
+      MasterVolumeState(volumeDb: volumeDb ?? this.volumeDb);
+}
+
+class MasterVolumeNotifier extends Notifier<MasterVolumeState> {
+  static const _prefKey = 'master_volume_db';
+
+  @override
+  MasterVolumeState build() {
+    // Load the persisted value after the first frame (default 0 dB).
+    Future<void>.microtask(_restore);
+    return const MasterVolumeState();
+  }
+
+  Future<void> _restore() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!prefs.containsKey(_prefKey)) return;
+    final db = prefs.getDouble(_prefKey) ?? 0.0;
+    if (db != state.volumeDb) {
+      state = state.copyWith(volumeDb: db);
+      TsNative.setMasterVolume(db);
+    }
+  }
+
+  Future<void> setVolume(double volumeDb) async {
+    final db = volumeDb.clamp(-20.0, 20.0);
+    state = state.copyWith(volumeDb: db);
+    TsNative.setMasterVolume(db);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_prefKey, db);
+  }
+}
+
+final masterVolumeProvider =
+    NotifierProvider<MasterVolumeNotifier, MasterVolumeState>(
+      MasterVolumeNotifier.new,
     );
 
 /// The last successful connection, kept across process death so the home

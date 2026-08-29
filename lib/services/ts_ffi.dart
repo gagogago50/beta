@@ -190,6 +190,10 @@ typedef _SetMicGainDart = void Function(int, double);
 typedef _SetClientVolumeNative = Void Function(Uint64, Uint16, Float);
 typedef _SetClientVolumeDart = void Function(int, int, double);
 
+// ts_set_master_volume(volume_db: f32)
+typedef _SetMasterVolumeNative = Void Function(Float);
+typedef _SetMasterVolumeDart = void Function(double);
+
 // ts_set_whisper_targets(connection_id, json) -> bool
 typedef _SetWhisperTargetsNative = Uint8 Function(Uint64, Pointer<Utf8>);
 typedef _SetWhisperTargetsDart = int Function(int, Pointer<Utf8>);
@@ -404,6 +408,10 @@ final _setMicGain = _lib.lookupFunction<_SetMicGainNative, _SetMicGainDart>(
 final _setClientVolume = _lib
     .lookupFunction<_SetClientVolumeNative, _SetClientVolumeDart>(
       'ts_set_client_volume',
+    );
+final _setMasterVolume = _lib
+    .lookupFunction<_SetMasterVolumeNative, _SetMasterVolumeDart>(
+      'ts_set_master_volume',
     );
 final _setWhisperTargets = _lib
     .lookupFunction<_SetWhisperTargetsNative, _SetWhisperTargetsDart>(
@@ -827,6 +835,11 @@ class TsNative {
 
   static void setClientVolume(int connectionId, int clientId, double volumeDb) {
     _setClientVolume(connectionId, clientId, volumeDb);
+  }
+
+  /// App-wide output volume (dB, -20..+20), shared by every server.
+  static void setMasterVolume(double volumeDb) {
+    _setMasterVolume(volumeDb);
   }
 
   /// Replace the outgoing whisper target list. Native side sorts, de-dupes,

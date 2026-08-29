@@ -691,4 +691,31 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get dismiss => 'Dismiss';
+
+  @override
+  String get masterVolume => 'Master volume';
+
+  @override
+  String get channelInfo => 'Channel info';
+
+  @override
+  String get bookmarkServer => 'Bookmark this server';
+
+  @override
+  String get networkStats => 'Network stats';
+
+  @override
+  String get refreshServer => 'Refresh server';
+
+  @override
+  String get noChannelInfo => 'No topic for this channel';
+
+  @override
+  String get close => 'Close';
+
+  @override
+  String get alreadyBookmarked => 'This server is already bookmarked';
+
+  @override
+  String get serverBookmarked => 'Server bookmarked';
 }

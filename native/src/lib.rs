@@ -826,6 +826,22 @@ pub const FRAME_SIZE: u64 = 960;
 /// Total samples written to the hardware output buffer since stream start.
 /// Logical frame number = PLAYED_SAMPLES / FRAME_SIZE.
 pub static PLAYED_SAMPLES: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(0));
+/// Master output volume as a linear-gain value packed with `f32::to_bits`.
+/// Applied as a final multiplier to the mix in the cpal callback, so one tap
+/// changes the loudness of every server without touching per-client volume.
+/// Default: unity (0 dB).
+pub static MASTER_VOLUME: Lazy<AtomicU32> = Lazy::new(|| AtomicU32::new(f32::to_bits(1.0)));
+
+pub fn master_volume_gain() -> f32 {
+    f32::from_bits(MASTER_VOLUME.load(Ordering::Relaxed)).max(0.0)
+}
+
+/// Sets the master output volume from a dB value in [-20, +20].
+pub fn set_master_volume_db(db: f32) {
+    let db = db.clamp(-20.0, 20.0);
+    let gain = 10.0f32.powf(db / 20.0);
+    MASTER_VOLUME.store(f32::to_bits(gain), Ordering::Relaxed);
+}
 /// Client ID snapshot for the audio callback — avoids iterating DashMap in the callback.
 /// Refreshed by the maintenance task every 500ms. Lock-free via ArcSwap.
 /// Entries are `(connection_id, client_id)` so two servers can reuse the same

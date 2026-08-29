@@ -1387,6 +1387,60 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Dismiss'**
   String get dismiss;
+
+  /// No description provided for @masterVolume.
+  ///
+  /// In en, this message translates to:
+  /// **'Master volume'**
+  String get masterVolume;
+
+  /// No description provided for @channelInfo.
+  ///
+  /// In en, this message translates to:
+  /// **'Channel info'**
+  String get channelInfo;
+
+  /// No description provided for @bookmarkServer.
+  ///
+  /// In en, this message translates to:
+  /// **'Bookmark this server'**
+  String get bookmarkServer;
+
+  /// No description provided for @networkStats.
+  ///
+  /// In en, this message translates to:
+  /// **'Network stats'**
+  String get networkStats;
+
+  /// No description provided for @refreshServer.
+  ///
+  /// In en, this message translates to:
+  /// **'Refresh server'**
+  String get refreshServer;
+
+  /// No description provided for @noChannelInfo.
+  ///
+  /// In en, this message translates to:
+  /// **'No topic for this channel'**
+  String get noChannelInfo;
+
+  /// No description provided for @close.
+  ///
+  /// In en, this message translates to:
+  /// **'Close'**
+  String get close;
+
+  /// No description provided for @alreadyBookmarked.
+  ///
+  /// In en, this message translates to:
+  /// **'This server is already bookmarked'**
+  String get alreadyBookmarked;
+
+  /// No description provided for @serverBookmarked.
+  ///
+  /// In en, this message translates to:
+  /// **'Server bookmarked'**
+  String get serverBookmarked;
 }
 
 class _AppLocalizationsDelegate

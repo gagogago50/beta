@@ -746,6 +746,9 @@ class _SessionTabState extends ConsumerState<_SessionTab> {
           GestureDetector(
             key: _speakerKey,
             onTap: () => notifier.toggleOutputMute(),
+            // Long-press = master output volume (app-wide gain), matching the
+            // Windows client's volume slider.
+            onLongPress: () => _showMasterVolume(),
             child: Icon(
               Icons.volume_up,
               color: conn.outputMuted ? context.ts.danger : context.ts.success,
@@ -789,9 +792,229 @@ class _SessionTabState extends ConsumerState<_SessionTab> {
               ],
             ),
           ),
+          const SizedBox(width: 24),
+          // --- More menu (channel info, bookmark, network stats, ...) ---
+          GestureDetector(
+            onTap: () => _showToolsMenu(conn, notifier),
+            child: Icon(
+              Icons.more_vert,
+              color: context.ts.textSecondary,
+              size: 26,
+            ),
+          ),
         ],
       ),
     );
+  }
+
+  /// Master output volume (app-wide), applied in the audio mix.
+  void _showMasterVolume() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: context.ts.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: Consumer(
+          builder: (ctx, ref, _) {
+            final vol = ref.watch(masterVolumeProvider).volumeDb;
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  AppLocalizations.of(context).masterVolume,
+                  style: TextStyle(color: context.ts.textPrimary, fontSize: 15),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Icon(
+                      Icons.volume_down,
+                      color: context.ts.textSecondary,
+                      size: 20,
+                    ),
+                    Expanded(
+                      child: Slider(
+                        value: vol,
+                        min: -20.0,
+                        max: 20.0,
+                        divisions: 40,
+                        activeColor: context.ts.accent,
+                        onChanged: (v) => ref
+                            .read(masterVolumeProvider.notifier)
+                            .setVolume(v),
+                      ),
+                    ),
+                    Icon(
+                      Icons.volume_up,
+                      color: context.ts.textSecondary,
+                      size: 20,
+                    ),
+                    SizedBox(
+                      width: 56,
+                      child: Text(
+                        '${vol.toStringAsFixed(1)} dB',
+                        style: TextStyle(
+                          color: context.ts.textSecondary,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  /// Extra client actions (Windows "Tools" equivalent) in one sheet.
+  void _showToolsMenu(TsConnectionState conn, TsConnectionNotifier notifier) {
+    final channel = conn.channels
+        .where((c) => c.id == conn.selectedChannelId)
+        .firstOrNull;
+    final al = AppLocalizations.of(context);
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: context.ts.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(Icons.info_outline, color: context.ts.accent),
+              title: Text(
+                al.channelInfo,
+                style: TextStyle(color: context.ts.textPrimary, fontSize: 14),
+              ),
+              subtitle: Text(
+                channel?.name ?? '',
+                style: TextStyle(color: context.ts.textSecondary, fontSize: 12),
+              ),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showChannelInfo(conn);
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.star_border, color: context.ts.accent),
+              title: Text(
+                al.bookmarkServer,
+                style: TextStyle(color: context.ts.textPrimary, fontSize: 14),
+              ),
+              onTap: () {
+                Navigator.pop(ctx);
+                _bookmarkCurrentServer(conn);
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.network_check, color: context.ts.accent),
+              title: Text(
+                al.networkStats,
+                style: TextStyle(color: context.ts.textPrimary, fontSize: 14),
+              ),
+              subtitle: Text(
+                '${conn.rttMs} ms · ${conn.jitterMs} ms · ${conn.packetLossPercent.toStringAsFixed(1)}%',
+                style: TextStyle(color: context.ts.textSecondary, fontSize: 12),
+              ),
+              onTap: () => Navigator.pop(ctx),
+            ),
+            ListTile(
+              leading: Icon(Icons.refresh, color: context.ts.accent),
+              title: Text(
+                al.refreshServer,
+                style: TextStyle(color: context.ts.textPrimary, fontSize: 14),
+              ),
+              onTap: () {
+                Navigator.pop(ctx);
+                ref
+                    .read(tsMultiServerProvider.notifier)
+                    .refreshRoster(widget.connectionId);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Displays the currently selected channel's topic / description.
+  void _showChannelInfo(TsConnectionState conn) {
+    final channel = conn.channels
+        .where((c) => c.id == conn.selectedChannelId)
+        .firstOrNull;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.ts.card,
+        title: Text(
+          channel?.name ?? AppLocalizations.of(ctx).channelInfo,
+          style: TextStyle(color: context.ts.textPrimary),
+        ),
+        content: Text(
+          (channel?.topic.isNotEmpty ?? false)
+              ? (channel!.topic)
+              : AppLocalizations.of(ctx).noChannelInfo,
+          style: TextStyle(color: context.ts.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(
+              AppLocalizations.of(ctx).close,
+              style: TextStyle(color: context.ts.textSecondary),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Saves the currently focused server into the bookmarks (if not present).
+  Future<void> _bookmarkCurrentServer(TsConnectionState conn) async {
+    final list = ref.read(serverListProvider.notifier);
+    final exists = ref
+        .read(serverListProvider)
+        .servers
+        .any((s) => s.address == _rtAddressOf(widget.connectionId));
+    if (exists) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppLocalizations.of(context).alreadyBookmarked)),
+      );
+      return;
+    }
+    await list.addServer(
+      Server(
+        id: ref.read(serverListProvider).servers.length == 0
+            ? '1'
+            : '${ref.read(serverListProvider).servers.length + 1}',
+        name: conn.serverName.isNotEmpty ? conn.serverName : 'Server',
+        address: _rtAddressOf(widget.connectionId),
+        nickname: conn.nickname,
+        channel: _rtChannelOf(widget.connectionId),
+      ),
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(AppLocalizations.of(context).serverBookmarked)),
+    );
+  }
+
+  String _rtAddressOf(int cid) {
+    final rt = ref.read(tsMultiServerProvider.notifier).runtimeAddress(cid);
+    return rt;
+  }
+
+  String? _rtChannelOf(int cid) {
+    return ref.read(tsMultiServerProvider.notifier).runtimeChannel(cid);
   }
 
   void _showStatusPanel(TsConnectionState conn, TsConnectionNotifier notifier) {

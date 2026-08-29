@@ -278,5 +278,14 @@
   "resume": "Resume",
   "resumeMicMuted": "Rejoining with the microphone muted",
   "resumeMicLive": "Rejoining as before (mic live)",
-  "dismiss": "Dismiss"
+  "dismiss": "Dismiss",
+  "masterVolume": "Master volume",
+  "channelInfo": "Channel info",
+  "bookmarkServer": "Bookmark this server",
+  "networkStats": "Network stats",
+  "refreshServer": "Refresh server",
+  "noChannelInfo": "No topic for this channel",
+  "close": "Close",
+  "alreadyBookmarked": "This server is already bookmarked",
+  "serverBookmarked": "Server bookmarked"
 }

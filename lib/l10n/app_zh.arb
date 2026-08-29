@@ -230,5 +230,14 @@
   "resume": "恢复",
   "resumeMicMuted": "恢复时麦克风保持静音",
   "resumeMicLive": "按之前的状态恢复（麦克风开启）",
-  "dismiss": "关闭"
+  "dismiss": "关闭",
+  "masterVolume": "主音量",
+  "channelInfo": "频道信息",
+  "bookmarkServer": "收藏此服务器",
+  "networkStats": "网络统计",
+  "refreshServer": "刷新服务器",
+  "noChannelInfo": "该频道没有主题",
+  "close": "关闭",
+  "alreadyBookmarked": "该服务器已在收藏中",
+  "serverBookmarked": "已收藏服务器"
 }
