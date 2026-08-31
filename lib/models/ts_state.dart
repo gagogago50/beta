@@ -997,15 +997,24 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
         final targetMode = data['target_mode'] as int;
         final fromName = data['from_client'] as String;
         final st = _stateOf(cid);
+        final text = data['message'] as String;
+        // Highlight a message that mentions our own nickname, like the Windows
+        // client. Empty text (a server-generated line) is marked as such.
+        final flagged =
+            text.isNotEmpty &&
+            st.nickname.isNotEmpty &&
+            text.toLowerCase().contains(st.nickname.toLowerCase());
         final msg = ChatMessage(
           id: st.messages.length,
           fromClient: fromName,
           fromClientId: fromId,
           targetMode: targetMode,
-          message: data['message'] as String,
+          message: text,
           timestamp: DateTime.now(),
           peerId: targetMode == 1 ? fromId : null,
           peerName: targetMode == 1 ? fromName : null,
+          serverGenerated: text.isEmpty,
+          highlighted: flagged,
         );
         _setSession(cid, st.copyWith(messages: [...st.messages, msg]));
         if (fromId != st.ownClientId) {
@@ -2030,6 +2039,43 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
       if (saved != null && (saved - client.volume).abs() > 0.001) {
         setClientVolume(cid, client.id, saved);
       }
+    }
+    // Apply the contact book (muted / volumeModifier) to the live roster,
+    // when the client has a saved contact for this server. A muted contact is
+    // silenced by dropping the gain to its minimum; a custom volumeModifier
+    // (dB) overrides the per-client volume.
+    if (!_stateOf(cid).connected) return;
+    final serverUid = _stateOf(cid).serverUid;
+    if (serverUid.isEmpty) return;
+    for (final client in _stateOf(cid).clients) {
+      final uid = client.uid;
+      if (uid == null || uid.isEmpty) continue;
+      _applyContactToClient(cid, serverUid, client);
+    }
+  }
+
+  /// Applies one contact's persisted settings to a live client.
+  void _applyContactToClient(int cid, String serverUid, TsClient client) {
+    final uid = client.uid;
+    if (uid == null || uid.isEmpty) return;
+    // ContactStore.load is async; the roster reconcile already runs off the
+    // poll loop. Persisted mute/volume is applied lazily by reading the
+    // SharedPreferences key directly (same source as ContactStore).
+    final prefs = _prefs;
+    if (prefs == null) return;
+    try {
+      final raw = prefs.getString('contact_${serverUid}_$uid');
+      if (raw == null) return;
+      final settings = ContactSettings.fromJson(
+        jsonDecode(raw) as Map<String, dynamic>,
+      );
+      var volumeDb = settings.volumeModifier;
+      if (settings.muted) volumeDb = -20.0; // full silence for a muted contact
+      if ((volumeDb - client.volume).abs() > 0.001) {
+        setClientVolume(cid, client.id, volumeDb);
+      }
+    } catch (_) {
+      // Malformed or absent contact → ignore.
     }
   }
 

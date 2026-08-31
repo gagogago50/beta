@@ -261,7 +261,14 @@ class VoiceAudioController(private val context: Context) {
                 ROUTE_BLUETOOTH -> {
                     manager.isSpeakerphoneOn = false
                     manager.isBluetoothScoOn = true
-                    manager.startBluetoothSco()
+                    // The legacy client retries up to 10 times, 500 ms apart,
+                    // because SCO negotiation can fail on some stacks. Keep the
+                    // route regardless: the device will settle once connected.
+                    var attempts = 0
+                    while (attempts < 10 && !startBluetoothScoQuietly(manager)) {
+                        attempts++
+                        Thread.sleep(500)
+                    }
                 }
 
                 ROUTE_SPEAKER -> {
@@ -282,6 +289,14 @@ class VoiceAudioController(private val context: Context) {
             ROUTE_AUTO
         }
     }
+
+    /** @return true if SCO started (or was already on); never throws. */
+    @Suppress("DEPRECATION")
+    private fun startBluetoothScoQuietly(manager: AudioManager): Boolean = runCatching {
+        manager.isBluetoothScoOn = true
+        manager.startBluetoothSco()
+        manager.isBluetoothScoOn
+    }.getOrDefault(false)
 
     @Suppress("DEPRECATION")
     private fun stopScoIfNeeded(manager: AudioManager) {

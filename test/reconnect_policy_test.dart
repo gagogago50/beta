@@ -67,12 +67,13 @@ void main() {
   });
 
   group('ReconnectPolicy.delayFor', () {
-    test('grows exponentially and is capped', () {
+    test('grows exponentially and is capped, with a 3s floor', () {
       // Random fixed at 0.5 → jitter factor exactly 1.0.
       final noJitter = _FixedRandom(0.5);
+      // Attempt 0 stays at the 3 s minimum floor, not the 2 s base.
       expect(
         ReconnectPolicy.delayFor(0, random: noJitter),
-        ReconnectPolicy.baseDelay,
+        ReconnectPolicy.minDelay,
       );
       expect(
         ReconnectPolicy.delayFor(1, random: noJitter),
@@ -86,6 +87,13 @@ void main() {
         ReconnectPolicy.delayFor(20, random: noJitter),
         ReconnectPolicy.maxDelay,
       );
+    });
+
+    test('never drops below the 3s minimum even with a negative jitter', () {
+      // Jitter factor 0.8 at attempt 0 → 2s*0.8 = 1.6s, but the floor is 3s.
+      final delay = ReconnectPolicy.delayFor(0, random: _FixedRandom(0.0));
+      expect(delay.inMilliseconds, greaterThanOrEqualTo(3000));
+      expect(delay, ReconnectPolicy.minDelay);
     });
 
     test('stays inside the +/-20% jitter window', () {

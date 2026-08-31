@@ -58,6 +58,11 @@ class ReconnectPolicy {
   /// by the same server restart do not come back in lockstep.
   static const jitterFraction = 0.2;
 
+  /// Minimum spacing between connection attempts. The legacy client never
+  /// reconnects sooner than 3 s after the previous attempt — a server
+  /// rejects/reconnects a client that hammers the handshake.
+  static const minDelay = Duration(seconds: 3);
+
   const ReconnectPolicy._();
 
   static bool shouldRetry({
@@ -70,7 +75,8 @@ class ReconnectPolicy {
     return attempt < maxAttempts;
   }
 
-  /// Exponential backoff with full ±[jitterFraction] jitter.
+  /// Exponential backoff with full ±[jitterFraction] jitter, but never below
+  /// [minDelay] (the 3 s floor the legacy client guarantees).
   ///
   /// [attempt] is 0-based: attempt 0 waits ~2s, 1 → ~4s, 2 → ~8s … capped at
   /// [maxDelay]. [random] is injectable so the behaviour is testable.
@@ -81,6 +87,7 @@ class ReconnectPolicy {
     final capped = min(raw.toDouble(), maxDelay.inMilliseconds.toDouble());
     // rng.nextDouble() ∈ [0,1) → factor ∈ [0.8, 1.2)
     final factor = 1.0 + (rng.nextDouble() * 2 - 1) * jitterFraction;
-    return Duration(milliseconds: (capped * factor).round());
+    final jittered = (capped * factor).round();
+    return Duration(milliseconds: max(jittered, minDelay.inMilliseconds));
   }
 }

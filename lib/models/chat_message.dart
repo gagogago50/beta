@@ -52,6 +52,16 @@ class ChatMessage {
   /// client can disconnect and disappear from the roster.
   final String? peerName;
 
+  /// A message synthesised by the client (kick/ban/system), not sent by a
+  /// human. Rendered distinctly, like the Windows client's system messages.
+  final bool serverGenerated;
+
+  /// A message the server marked as to-be-censored (bad words policy).
+  final bool censored;
+
+  /// Whether the message was highlighted (contains the client's nickname).
+  final bool highlighted;
+
   const ChatMessage({
     required this.id,
     required this.fromClient,
@@ -61,7 +71,24 @@ class ChatMessage {
     required this.timestamp,
     this.peerId,
     this.peerName,
+    this.serverGenerated = false,
+    this.censored = false,
+    this.highlighted = false,
   });
+
+  ChatMessage copyWith({String? message, bool? highlighted}) => ChatMessage(
+    id: id,
+    fromClient: fromClient,
+    fromClientId: fromClientId,
+    targetMode: targetMode,
+    message: message ?? this.message,
+    timestamp: timestamp,
+    peerId: peerId,
+    peerName: peerName,
+    serverGenerated: serverGenerated,
+    censored: censored,
+    highlighted: highlighted ?? this.highlighted,
+  );
 
   /// Thread this message belongs to.
   ///

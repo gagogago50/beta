@@ -165,28 +165,43 @@ class _ChatPanelState extends ConsumerState<ChatPanel> {
                   itemBuilder: (context, index) {
                     final msg = messages[index];
                     final isOwn = msg.fromClientId == ownId;
+                    // System / server-generated lines are italic and muted; a
+                    // highlighted message (mentions our nickname) is shown in
+                    // the accent color, like the Windows client.
+                    final baseColor = msg.serverGenerated
+                        ? context.ts.textSecondary
+                        : msg.highlighted
+                        ? context.ts.accent
+                        : context.ts.textPrimary;
+                    final author = msg.serverGenerated
+                        ? ''
+                        : '${msg.fromClient}: ';
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 2),
                       child: RichText(
                         text: TextSpan(
+                          style: TextStyle(
+                            color: baseColor,
+                            fontSize: 13,
+                            fontStyle: msg.serverGenerated
+                                ? FontStyle.italic
+                                : FontStyle.normal,
+                          ),
                           children: [
-                            TextSpan(
-                              text: '${msg.fromClient}: ',
-                              style: TextStyle(
-                                color: isOwn
-                                    ? context.ts.accent
-                                    : context.ts.accentName,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13,
+                            if (author.isNotEmpty)
+                              TextSpan(
+                                text: author,
+                                style: TextStyle(
+                                  color: isOwn
+                                      ? context.ts.accent
+                                      : msg.highlighted
+                                      ? context.ts.accent
+                                      : context.ts.accentName,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                ),
                               ),
-                            ),
-                            TextSpan(
-                              text: msg.message,
-                              style: TextStyle(
-                                color: context.ts.textPrimary,
-                                fontSize: 13,
-                              ),
-                            ),
+                            TextSpan(text: msg.message),
                           ],
                         ),
                       ),
