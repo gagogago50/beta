@@ -240,3 +240,37 @@ Date : 31 août 2026
 | G | **Arbre : cache `clientsDirty` + pré-aplatir** | `ChannelTree` | S |
 | H | **TSDNS multi-endpoints + androidId** | Rust (résolveur) | L |
 | I | **Refactor JNI direct PCM 16 bits** (moins de copies) | Kotlin + Rust | L |
+
+---
+
+## 16. Phase 22 — statut client complet, duck/unduck, contacts ignore*, arbre pré-aplati
+
+Résumé des ajouts de la phase 22 (voir `docs/PHASE-22-AUDIO-ROUTES-DUCK-STATUT-CLIENT.md` pour le détail).
+
+### (A) Pré-aplatissement de l'arbre (`ChannelTree`) — **fait**
+- Remplace la récursion par une **liste plate** `(channel, depth)` pré-triée et **mémorisée**
+  (`_rows` + `_flatDirty`), reconstruite seulement si les entrées changent. Équivalent du
+  `rebuildVisibleTree()` du client legacy.
+
+### (B) `duck/unduck` du volume maître — **fait**
+- `MasterVolumeNotifier.setVolumeLive(db)` (n'écrit pas `SharedPreferences`).
+- `_duckMasterVolume()`/`_unduckMasterVolume()` : −6 dB à la perte de focus, restauration au regain,
+  sans écraser la valeur choisie en réglages. Le silence du micro reste côté Dart.
+
+### (C) Propriétés client (`TsClient`) — **fait** (Rust + Dart)
+- `client_type`(0/1=query), `talk_power`, `talk_power_granted`, `is_priority_speaker`,
+  `is_channel_commander`, `is_recording`, `input/output_hardware_enabled`, `output_only_muted`,
+  `phonetic_name`, `country_code`, `metadata`, `avatar_hash`. Alimentées depuis le livre
+  `ts_bookkeeping::data::Client`. `ClientType` = `Normal` | `Query{admin}`.
+
+### (D) Filtres `ignore*` du carnet de contacts — **fait**
+- `_contactForClient(cid, clientId)` lit le contact d'un client vivant ; `text_message` applique
+  `ignorePrivateChat` (cible 1) et `ignorePublicChat` (cible 2/3) avant stockage.
+
+### (E) `INPUT_DEACTIVATED` vs `INPUT_MUTED` (PTT) — **fait (équivalence)**
+- La capture micro n'est ouverte que si `_shouldMicBeActive` (PTT pressé OU non-mute) ; mute et
+  PTT relâché coupent donc la transmission sans distinction de drapeau filaire.
+
+> **Reste (futures phases)** : TSDNS multi-endpoints + `androidId` (H), refactor JNI direct PCM
+> 16 bits (I), recherche globale, gestionnaire de fichiers (ftlist/ftdelete), validation appareil
+> sur `voice.teamspeak.com`.
