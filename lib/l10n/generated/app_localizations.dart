@@ -593,7 +593,7 @@ abstract class AppLocalizations {
   /// No description provided for @whisper.
   ///
   /// In en, this message translates to:
-  /// **'Whisper'**
+  /// **'Whisper (pick targets)'**
   String get whisper;
 
   /// No description provided for @whisperTargets.
@@ -1471,6 +1471,48 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Disconnect all servers'**
   String get disconnectAllServers;
+
+  /// No description provided for @toggleMic.
+  ///
+  /// In en, this message translates to:
+  /// **'Toggle microphone (input mute)'**
+  String get toggleMic;
+
+  /// No description provided for @fullMute.
+  ///
+  /// In en, this message translates to:
+  /// **'Full mute (input + output)'**
+  String get fullMute;
+
+  /// No description provided for @unmuteOutput.
+  ///
+  /// In en, this message translates to:
+  /// **'Unmute output'**
+  String get unmuteOutput;
+
+  /// No description provided for @muteOutput.
+  ///
+  /// In en, this message translates to:
+  /// **'Mute output'**
+  String get muteOutput;
+
+  /// No description provided for @whisperReady.
+  ///
+  /// In en, this message translates to:
+  /// **'Whisper ready — tap to talk only to targets'**
+  String get whisperReady;
+
+  /// No description provided for @whisperOn.
+  ///
+  /// In en, this message translates to:
+  /// **'Whispering — active'**
+  String get whisperOn;
+
+  /// No description provided for @toolsMenu.
+  ///
+  /// In en, this message translates to:
+  /// **'More options'**
+  String get toolsMenu;
 }
 
 class _AppLocalizationsDelegate

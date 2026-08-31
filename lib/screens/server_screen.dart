@@ -629,6 +629,7 @@ class _SessionTabState extends ConsumerState<_SessionTab> {
     } else {
       micColor = conn.voiceActive ? context.ts.accent : context.ts.success;
     }
+    final al = AppLocalizations.of(context);
 
     return Container(
       height: 52,
@@ -637,22 +638,30 @@ class _SessionTabState extends ConsumerState<_SessionTab> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          GestureDetector(
-            key: _micKey,
-            onTap: () => notifier.toggleInputMute(),
-            onLongPress: () => _showVoiceSettings(conn, notifier),
-            child: Icon(Icons.mic, color: micColor, size: 28),
+          // Let every control announce what it does (discoverability, and a
+          // long-press always opens the matching sheet).
+          Tooltip(
+            message: al.toggleMic,
+            child: GestureDetector(
+              key: _micKey,
+              onTap: () => notifier.toggleInputMute(),
+              onLongPress: () => _showVoiceSettings(conn, notifier),
+              child: Icon(Icons.mic, color: micColor, size: 28),
+            ),
           ),
           const SizedBox(width: 24),
-          GestureDetector(
-            key: _headsetKey,
-            onTap: () => notifier.toggleFullMute(),
-            child: Icon(
-              Icons.headset,
-              color: conn.inputMuted || conn.outputMuted
-                  ? context.ts.danger
-                  : context.ts.success,
-              size: 28,
+          Tooltip(
+            message: al.fullMute,
+            child: GestureDetector(
+              key: _headsetKey,
+              onTap: () => notifier.toggleFullMute(),
+              child: Icon(
+                Icons.headset,
+                color: conn.inputMuted || conn.outputMuted
+                    ? context.ts.danger
+                    : context.ts.success,
+                size: 28,
+              ),
             ),
           ),
           if (conn.pttMode) ...[
@@ -668,11 +677,13 @@ class _SessionTabState extends ConsumerState<_SessionTab> {
                   height: 40,
                   decoration: BoxDecoration(
                     color: conn.pttPressed
-                        ? const Color(0xFF4444AA)
+                        ? context.ts.accent
                         : context.ts.divider,
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: const Color(0xFF888888),
+                      color: conn.pttPressed
+                          ? context.ts.accent
+                          : context.ts.textMuted,
                       width: 2,
                     ),
                   ),
@@ -691,121 +702,144 @@ class _SessionTabState extends ConsumerState<_SessionTab> {
             ),
           ],
           const SizedBox(width: 24),
-          GestureDetector(
-            onTap: () => _showStatusPanel(conn, notifier),
-            child: Icon(
-              conn.away ? Icons.bedtime : Icons.badge_outlined,
-              color: conn.away ? context.ts.warning : context.ts.textSecondary,
-              size: 26,
+          Tooltip(
+            message: al.myStatus,
+            child: GestureDetector(
+              onTap: () => _showStatusPanel(conn, notifier),
+              child: Icon(
+                conn.away ? Icons.bedtime : Icons.badge_outlined,
+                color: conn.away
+                    ? context.ts.warning
+                    : context.ts.textSecondary,
+                size: 26,
+              ),
             ),
           ),
           const SizedBox(width: 24),
-          GestureDetector(
-            key: _whisperKey,
-            onTap: () {
-              if (!conn.hasWhisperTargets) {
-                _showWhisperPanel(conn, notifier);
-                return;
-              }
-              notifier.toggleWhisperActive();
-            },
-            onLongPress: () => _showWhisperPanel(conn, notifier),
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Icon(
-                  Icons.record_voice_over,
-                  color: conn.whisperActive
-                      ? context.ts.accentAlt
-                      : conn.hasWhisperTargets
-                      ? context.ts.textSecondary
-                      : context.ts.textSecondary,
-                  size: 28,
-                ),
-                if (conn.hasWhisperTargets)
-                  Positioned(
-                    right: -2,
-                    top: -2,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 4,
-                        vertical: 1,
-                      ),
-                      decoration: BoxDecoration(
-                        color: context.ts.accentAlt,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        '${conn.whisperTargetClientIds.length + conn.whisperTargetChannelIds.length}',
-                        style: TextStyle(
-                          color: context.ts.textPrimary,
-                          fontSize: 9,
-                          fontWeight: FontWeight.bold,
+          Tooltip(
+            message: conn.whisperActive
+                ? al.whisperOn
+                : conn.hasWhisperTargets
+                ? al.whisperReady
+                : al.whisper,
+            child: GestureDetector(
+              key: _whisperKey,
+              onTap: () {
+                if (!conn.hasWhisperTargets) {
+                  _showWhisperPanel(conn, notifier);
+                  return;
+                }
+                notifier.toggleWhisperActive();
+              },
+              onLongPress: () => _showWhisperPanel(conn, notifier),
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Icon(
+                    Icons.record_voice_over,
+                    color: conn.whisperActive
+                        ? context.ts.accentAlt
+                        : conn.hasWhisperTargets
+                        ? context.ts.textPrimary
+                        : context.ts.textSecondary,
+                    size: 28,
+                  ),
+                  if (conn.hasWhisperTargets)
+                    Positioned(
+                      right: -2,
+                      top: -2,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 1,
+                        ),
+                        decoration: BoxDecoration(
+                          color: context.ts.accentAlt,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          '${conn.whisperTargetClientIds.length + conn.whisperTargetChannelIds.length}',
+                          style: TextStyle(
+                            color: context.ts.textPrimary,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
           const SizedBox(width: 24),
-          GestureDetector(
-            key: _speakerKey,
-            onTap: () => notifier.toggleOutputMute(),
-            // Long-press = master output volume (app-wide gain), matching the
-            // Windows client's volume slider.
-            onLongPress: () => _showMasterVolume(),
-            child: Icon(
-              Icons.volume_up,
-              color: conn.outputMuted ? context.ts.danger : context.ts.success,
-              size: 28,
+          Tooltip(
+            message: conn.outputMuted ? al.unmuteOutput : al.muteOutput,
+            child: GestureDetector(
+              key: _speakerKey,
+              onTap: () => notifier.toggleOutputMute(),
+              // Long-press = master output volume (app-wide gain), matching the
+              // Windows client's volume slider.
+              onLongPress: () => _showMasterVolume(),
+              child: Icon(
+                Icons.volume_up,
+                color: conn.outputMuted
+                    ? context.ts.danger
+                    : context.ts.success,
+                size: 28,
+              ),
             ),
           ),
           const SizedBox(width: 24),
           // --- Files / transfers (live progress bar) ---
-          GestureDetector(
-            onTap: () => _showTransfers(conn, notifier),
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Icon(
-                  Icons.folder_shared,
-                  color: context.ts.textSecondary,
-                  size: 26,
-                ),
-                if (conn.transfers.isNotEmpty)
-                  Positioned(
-                    right: -2,
-                    top: -2,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 4,
-                        vertical: 1,
-                      ),
-                      decoration: BoxDecoration(
-                        color: context.ts.accent,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        '${conn.transfers.length}',
-                        style: TextStyle(
-                          color: context.ts.textPrimary,
-                          fontSize: 9,
+          Tooltip(
+            message: al.transfers,
+            child: GestureDetector(
+              onTap: () => _showTransfers(conn, notifier),
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Icon(
+                    Icons.folder_shared,
+                    color: context.ts.textSecondary,
+                    size: 26,
+                  ),
+                  if (conn.transfers.isNotEmpty)
+                    Positioned(
+                      right: -2,
+                      top: -2,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 1,
+                        ),
+                        decoration: BoxDecoration(
+                          color: context.ts.accent,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          '${conn.transfers.length}',
+                          style: TextStyle(
+                            color: context.ts.textPrimary,
+                            fontSize: 9,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
           const SizedBox(width: 24),
           // --- More menu (channel info, bookmark, network stats, ...) ---
-          GestureDetector(
-            onTap: () => _showToolsMenu(conn, notifier),
-            child: Icon(
-              Icons.more_vert,
-              color: context.ts.textSecondary,
-              size: 26,
+          Tooltip(
+            message: al.toolsMenu,
+            child: GestureDetector(
+              onTap: () => _showToolsMenu(conn, notifier),
+              child: Icon(
+                Icons.more_vert,
+                color: context.ts.textSecondary,
+                size: 26,
+              ),
             ),
           ),
         ],

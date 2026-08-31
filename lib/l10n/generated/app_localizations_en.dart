@@ -269,7 +269,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get notifConnected => 'Connected';
 
   @override
-  String get whisper => 'Whisper';
+  String get whisper => 'Whisper (pick targets)';
 
   @override
   String get whisperTargets => 'Whisper targets';
@@ -733,4 +733,25 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get disconnectAllServers => 'Disconnect all servers';
+
+  @override
+  String get toggleMic => 'Toggle microphone (input mute)';
+
+  @override
+  String get fullMute => 'Full mute (input + output)';
+
+  @override
+  String get unmuteOutput => 'Unmute output';
+
+  @override
+  String get muteOutput => 'Mute output';
+
+  @override
+  String get whisperReady => 'Whisper ready — tap to talk only to targets';
+
+  @override
+  String get whisperOn => 'Whispering — active';
+
+  @override
+  String get toolsMenu => 'More options';
 }

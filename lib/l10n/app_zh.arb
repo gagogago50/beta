@@ -244,5 +244,13 @@
   "unpinServer": "取消置顶",
   "moveUp": "上移",
   "moveDown": "下移",
-  "disconnectAllServers": "断开所有服务器"
+  "disconnectAllServers": "断开所有服务器",
+  "toggleMic": "切换麦克风（输入静音）",
+  "fullMute": "完全静音（输入 + 输出）",
+  "unmuteOutput": "取消输出静音",
+  "muteOutput": "输出静音",
+  "whisper": "耳语（选择目标）",
+  "whisperReady": "耳语就绪——点击只对目标说话",
+  "whisperOn": "正在耳语",
+  "toolsMenu": "更多选项"
 }

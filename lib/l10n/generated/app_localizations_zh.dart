@@ -264,7 +264,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get notifConnected => '已连接';
 
   @override
-  String get whisper => '私语';
+  String get whisper => '耳语（选择目标）';
 
   @override
   String get whisperTargets => '私语目标';
@@ -716,4 +716,25 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get disconnectAllServers => '断开所有服务器';
+
+  @override
+  String get toggleMic => '切换麦克风（输入静音）';
+
+  @override
+  String get fullMute => '完全静音（输入 + 输出）';
+
+  @override
+  String get unmuteOutput => '取消输出静音';
+
+  @override
+  String get muteOutput => '输出静音';
+
+  @override
+  String get whisperReady => '耳语就绪——点击只对目标说话';
+
+  @override
+  String get whisperOn => '正在耳语';
+
+  @override
+  String get toolsMenu => '更多选项';
 }

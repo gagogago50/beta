@@ -292,5 +292,13 @@
   "unpinServer": "Unpin",
   "moveUp": "Move up",
   "moveDown": "Move down",
-  "disconnectAllServers": "Disconnect all servers"
+  "disconnectAllServers": "Disconnect all servers",
+  "toggleMic": "Toggle microphone (input mute)",
+  "fullMute": "Full mute (input + output)",
+  "unmuteOutput": "Unmute output",
+  "muteOutput": "Mute output",
+  "whisper": "Whisper (pick targets)",
+  "whisperReady": "Whisper ready — tap to talk only to targets",
+  "whisperOn": "Whispering — active",
+  "toolsMenu": "More options"
 }
