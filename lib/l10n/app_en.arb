@@ -287,5 +287,10 @@
   "noChannelInfo": "No topic for this channel",
   "close": "Close",
   "alreadyBookmarked": "This server is already bookmarked",
-  "serverBookmarked": "Server bookmarked"
+  "serverBookmarked": "Server bookmarked",
+  "pinServer": "Pin to top",
+  "unpinServer": "Unpin",
+  "moveUp": "Move up",
+  "moveDown": "Move down",
+  "disconnectAllServers": "Disconnect all servers"
 }

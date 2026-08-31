@@ -239,5 +239,10 @@
   "noChannelInfo": "该频道没有主题",
   "close": "关闭",
   "alreadyBookmarked": "该服务器已在收藏中",
-  "serverBookmarked": "已收藏服务器"
+  "serverBookmarked": "已收藏服务器",
+  "pinServer": "置顶",
+  "unpinServer": "取消置顶",
+  "moveUp": "上移",
+  "moveDown": "下移",
+  "disconnectAllServers": "断开所有服务器"
 }

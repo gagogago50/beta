@@ -701,4 +701,19 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get serverBookmarked => '已收藏服务器';
+
+  @override
+  String get pinServer => '置顶';
+
+  @override
+  String get unpinServer => '取消置顶';
+
+  @override
+  String get moveUp => '上移';
+
+  @override
+  String get moveDown => '下移';
+
+  @override
+  String get disconnectAllServers => '断开所有服务器';
 }

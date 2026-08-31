@@ -119,7 +119,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       itemBuilder: (context, index) => _buildServerTile(
                         context,
                         ref,
-                        serverState.servers[index],
+                        ref
+                            .read(serverListProvider.notifier)
+                            .sortedServers()[index],
                       ),
                     ),
             ),
@@ -172,11 +174,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Widget _buildServerTile(BuildContext context, WidgetRef ref, Server server) {
+    final isFav = ref.read(serverListProvider).favoriteIds.contains(server.id);
     return Card(
       color: context.ts.card,
       margin: EdgeInsets.zero,
       child: ListTile(
-        leading: Icon(Icons.dns, color: context.ts.accent),
+        leading: Icon(
+          isFav ? Icons.star : Icons.dns,
+          color: isFav ? context.ts.warning : context.ts.accent,
+        ),
         title: Text(
           server.name,
           style: TextStyle(color: context.ts.textPrimary, fontSize: 15),
@@ -192,12 +198,37 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               case 'edit':
                 _addOrEditServer(context, ref, existing: server);
                 break;
+              case 'favorite':
+                ref.read(serverListProvider.notifier).toggleFavorite(server.id);
+                break;
+              case 'up':
+                ref.read(serverListProvider.notifier).moveUp(server.id);
+                break;
+              case 'down':
+                ref.read(serverListProvider.notifier).moveDown(server.id);
+                break;
               case 'delete':
                 _deleteServer(context, ref, server);
                 break;
             }
           },
           itemBuilder: (_) => [
+            PopupMenuItem(
+              value: 'favorite',
+              child: Text(
+                isFav
+                    ? AppLocalizations.of(context).unpinServer
+                    : AppLocalizations.of(context).pinServer,
+              ),
+            ),
+            PopupMenuItem(
+              value: 'up',
+              child: Text(AppLocalizations.of(context).moveUp),
+            ),
+            PopupMenuItem(
+              value: 'down',
+              child: Text(AppLocalizations.of(context).moveDown),
+            ),
             PopupMenuItem(
               value: 'edit',
               child: Text(AppLocalizations.of(context).edit),

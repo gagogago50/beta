@@ -16,6 +16,7 @@ import '../models/reconnect_policy.dart';
 import '../models/chat_message.dart';
 import '../models/resume_intent.dart';
 import '../models/server.dart';
+import '../models/server_order.dart';
 import '../services/ts_ffi.dart';
 import '../services/app_log.dart';
 import '../services/audio_route_service.dart';
@@ -355,15 +356,26 @@ const _sentinel = Object();
 
 class ServerListState {
   final List<Server> servers;
+
+  /// Server ids the user pinned. Pinned servers sort first on the home screen.
+  final Set<String> favoriteIds;
   final bool loading;
 
-  const ServerListState({this.servers = const [], this.loading = true});
+  const ServerListState({
+    this.servers = const [],
+    this.favoriteIds = const {},
+    this.loading = true,
+  });
 
-  ServerListState copyWith({List<Server>? servers, bool? loading}) =>
-      ServerListState(
-        servers: servers ?? this.servers,
-        loading: loading ?? this.loading,
-      );
+  ServerListState copyWith({
+    List<Server>? servers,
+    Set<String>? favoriteIds,
+    bool? loading,
+  }) => ServerListState(
+    servers: servers ?? this.servers,
+    favoriteIds: favoriteIds ?? this.favoriteIds,
+    loading: loading ?? this.loading,
+  );
 }
 
 // ─── Multi-server coordination state ────────────────────────────────
@@ -1973,8 +1985,16 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
     setWhisperTargets(cid: cid, clientIds: clients, channelIds: channels);
   }
 
+  DateTime _lastWhisperStats = DateTime.fromMillisecondsSinceEpoch(0);
+  static const _whisperStatsThrottle = Duration(seconds: 3);
+
   void _refreshWhisperStats(int cid) {
+    // The allow-list counter changes rarely; calling getWhisperStatus (an FFI
+    // round-trip + JSON decode) on every roster reconcile was pure overhead.
     if (!_stateOf(cid).whisperAllowlistEnabled) return;
+    final now = DateTime.now();
+    if (now.difference(_lastWhisperStats) < _whisperStatsThrottle) return;
+    _lastWhisperStats = now;
     try {
       final status =
           jsonDecode(TsNative.getWhisperStatus(cid)) as Map<String, dynamic>;
@@ -2341,25 +2361,28 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
     }
     _lastNotification = now;
 
-    final connected = state.sessions.values.where((s) => s.connected).toList();
-    if (connected.isEmpty) {
+    var connectedCount = 0;
+    var anyInputMuted = false;
+    var anyVoice = false;
+    var allMuted = true;
+    final names = <String>[];
+    for (final s in state.sessions.values) {
+      if (!s.connected) continue;
+      connectedCount++;
+      anyInputMuted = anyInputMuted || s.inputMuted;
+      anyVoice = anyVoice || s.voiceActive;
+      allMuted = allMuted && s.inputMuted && s.outputMuted;
+      if (names.length < 2 && s.serverName.isNotEmpty) names.add(s.serverName);
+    }
+    if (connectedCount == 0) {
       _notificationStarted = false;
       ForegroundService.stop();
       return;
     }
-    final title = connected.length == 1
-        ? (connected.first.serverName.isNotEmpty
-              ? connected.first.serverName
-              : 'TeamSpeak')
-        : '${connected.length} servers';
-    final anyInputMuted = state.sessions.values.any(
-      (s) => s.inputMuted && s.connected,
-    );
-    final anyVoice = state.sessions.values.any((s) => s.voiceActive);
-    var text = connected
-        .map((s) => s.serverName.isNotEmpty ? s.serverName : 'server')
-        .take(2)
-        .join(' • ');
+    final title = connectedCount == 1
+        ? (names.isNotEmpty ? names.first : 'TeamSpeak')
+        : '$connectedCount servers';
+    var text = names.isNotEmpty ? names.join(' \u2022 ') : 'server';
     if (!anyInputMuted || anyVoice) {
       text = '$text \u2014 Speaking';
     }
@@ -2371,9 +2394,7 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
         text: text,
         mic: micVal,
         inputMuted: anyInputMuted,
-        fullMuted: state.sessions.values
-            .where((s) => s.connected)
-            .every((s) => s.inputMuted && s.outputMuted),
+        fullMuted: allMuted,
         muteLabel: _notifMuteLabel,
         unmuteLabel: _notifUnmuteLabel,
         disconnectLabel: _notifDisconnectLabel,
@@ -2384,9 +2405,7 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
         text: text,
         mic: micVal,
         inputMuted: anyInputMuted,
-        fullMuted: state.sessions.values
-            .where((s) => s.connected)
-            .every((s) => s.inputMuted && s.outputMuted),
+        fullMuted: allMuted,
         muteLabel: _notifMuteLabel,
         unmuteLabel: _notifUnmuteLabel,
         disconnectLabel: _notifDisconnectLabel,
@@ -2606,6 +2625,15 @@ class ServerListNotifier extends Notifier<ServerListState> {
     return const ServerListState();
   }
 
+  /// Pinned servers first, then the saved order.
+  List<Server> sortedServers() {
+    final favs = state.favoriteIds;
+    return [
+      ...state.servers.where((s) => favs.contains(s.id)),
+      ...state.servers.where((s) => !favs.contains(s.id)),
+    ];
+  }
+
   Future<void> _loadFromDisk() async {
     final prefs = await SharedPreferences.getInstance();
     final data = prefs.getStringList('servers') ?? [];
@@ -2646,6 +2674,9 @@ class ServerListNotifier extends Notifier<ServerListState> {
         );
       }
       state = state.copyWith(servers: servers, loading: false);
+      // Restore pinned server ids so the home screen keeps them first.
+      final favorites = prefs.getStringList('server_favorites') ?? const [];
+      state = state.copyWith(favoriteIds: favorites.toSet());
       if (migratedLegacyPassword) {
         // Server.toJson deliberately omits passwords, so this removes every
         // migrated plaintext value from SharedPreferences.
@@ -2655,6 +2686,37 @@ class ServerListNotifier extends Notifier<ServerListState> {
       AppLog.e(_tag, 'server secret migration failed', error);
       state = state.copyWith(servers: const [], loading: false);
     }
+  }
+
+  Future<void> _saveFavorites() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('server_favorites', state.favoriteIds.toList());
+  }
+
+  /// Pins/unpins a server (pinned servers sort first on the home screen).
+  Future<void> toggleFavorite(String serverId) async {
+    final favs = Set<String>.from(state.favoriteIds);
+    if (!favs.remove(serverId)) favs.add(serverId);
+    state = state.copyWith(favoriteIds: favs);
+    // Re-sort so a newly pinned server appears first immediately.
+    state = state.copyWith(
+      servers: sortServers(state.servers, state.favoriteIds),
+    );
+    await _saveFavorites();
+    await _saveToDisk();
+  }
+
+  /// Moves a server one position up in the list (if it is not pinned first).
+  Future<void> moveUp(String serverId) => _move(serverId, -1);
+
+  /// Moves a server one position down in the list.
+  Future<void> moveDown(String serverId) => _move(serverId, 1);
+
+  Future<void> _move(String serverId, int delta) async {
+    state = state.copyWith(
+      servers: moveServer(state.servers, state.favoriteIds, serverId, delta),
+    );
+    await _saveToDisk();
   }
 
   Future<void> _saveToDisk() async {

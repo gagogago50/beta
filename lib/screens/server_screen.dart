@@ -84,6 +84,12 @@ class _ServerScreenState extends ConsumerState<ServerScreen> {
               tooltip: 'Connect another server',
               onPressed: () => _addAnotherServer(context, ref),
             ),
+            if (multi.connectedCount > 1)
+              IconButton(
+                icon: Icon(Icons.logout, color: context.ts.danger),
+                tooltip: AppLocalizations.of(context).disconnectAllServers,
+                onPressed: () => notifier.disconnectAll(),
+              ),
           ],
           bottom: order.isEmpty
               ? null

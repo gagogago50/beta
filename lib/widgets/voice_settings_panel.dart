@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/generated/app_localizations.dart';
 
@@ -203,6 +204,52 @@ class _VoiceSettingsPanelState extends State<VoiceSettingsPanel> {
               style: TextStyle(color: context.ts.textSecondary, fontSize: 11),
             ),
           ],
+        ),
+        const SizedBox(height: 12),
+        const Divider(),
+        // Master output volume (app-wide), also reachable by long-pressing the
+        // speaker icon. Included here for discoverability.
+        Consumer(
+          builder: (context, ref, _) {
+            final vol = ref.watch(masterVolumeProvider).volumeDb;
+            return Row(
+              children: [
+                Icon(
+                  Icons.volume_up,
+                  color: context.ts.textSecondary,
+                  size: 20,
+                ),
+                Text(
+                  AppLocalizations.of(context).masterVolume,
+                  style: TextStyle(
+                    color: context.ts.textSecondary,
+                    fontSize: 12,
+                  ),
+                ),
+                Expanded(
+                  child: Slider(
+                    value: vol,
+                    min: -20.0,
+                    max: 20.0,
+                    divisions: 40,
+                    activeColor: context.ts.accent,
+                    onChanged: (v) =>
+                        ref.read(masterVolumeProvider.notifier).setVolume(v),
+                  ),
+                ),
+                SizedBox(
+                  width: 52,
+                  child: Text(
+                    '${vol.toStringAsFixed(1)} dB',
+                    style: TextStyle(
+                      color: context.ts.textSecondary,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
         ),
       ],
     );

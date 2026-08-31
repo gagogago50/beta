@@ -718,4 +718,19 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get serverBookmarked => 'Server bookmarked';
+
+  @override
+  String get pinServer => 'Pin to top';
+
+  @override
+  String get unpinServer => 'Unpin';
+
+  @override
+  String get moveUp => 'Move up';
+
+  @override
+  String get moveDown => 'Move down';
+
+  @override
+  String get disconnectAllServers => 'Disconnect all servers';
 }

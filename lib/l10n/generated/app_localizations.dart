@@ -1441,6 +1441,36 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Server bookmarked'**
   String get serverBookmarked;
+
+  /// No description provided for @pinServer.
+  ///
+  /// In en, this message translates to:
+  /// **'Pin to top'**
+  String get pinServer;
+
+  /// No description provided for @unpinServer.
+  ///
+  /// In en, this message translates to:
+  /// **'Unpin'**
+  String get unpinServer;
+
+  /// No description provided for @moveUp.
+  ///
+  /// In en, this message translates to:
+  /// **'Move up'**
+  String get moveUp;
+
+  /// No description provided for @moveDown.
+  ///
+  /// In en, this message translates to:
+  /// **'Move down'**
+  String get moveDown;
+
+  /// No description provided for @disconnectAllServers.
+  ///
+  /// In en, this message translates to:
+  /// **'Disconnect all servers'**
+  String get disconnectAllServers;
 }
 
 class _AppLocalizationsDelegate
