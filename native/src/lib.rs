@@ -655,6 +655,33 @@ pub struct TsClient {
     pub permission_hints: u64,
     pub volume: f32,
     pub uid: Option<String>,
+    /// Client type: 0 = normal user, 1 = server query (a bot/admin tool).
+    pub client_type: u8,
+    /// `client_talk_power`: how much talk power this client holds.
+    pub talk_power: i32,
+    /// Whether the client's talk power satisfies the channel's requirement.
+    pub talk_power_granted: bool,
+    /// Whether the client is recording the server (TTS / `client_recording`).
+    pub is_priority_speaker: bool,
+    /// Whether the client is the channel commander (server-granted icon).
+    pub is_channel_commander: bool,
+    /// `client_record`: whether the client is recording this channel.
+    pub is_recording: bool,
+    /// Capture / output hardware flags (distinct from the "muted" flags: a
+    /// user can have input unmuted but hardware disabled, which the desktop
+    /// client shows differently).
+    pub input_hardware_enabled: bool,
+    pub output_hardware_enabled: bool,
+    /// `client_output_only_muted`: hears nothing but still transmits.
+    pub output_only_muted: bool,
+    /// Phonetic rendition of the nickname, when the server provides one.
+    pub phonetic_name: String,
+    /// ISO country code (e.g. "DE"), empty when unknown.
+    pub country_code: String,
+    /// Free-form `client_meta_data`, used by some community groups.
+    pub metadata: String,
+    /// MD5 of the avatar image, used to fetch it via the file-transfer channel.
+    pub avatar_hash: String,
 }
 
 // ─── Per-client lock-free jitter buffer ──────────────────────────────

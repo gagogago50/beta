@@ -205,6 +205,22 @@ fn refresh_from_book(
                 away: c.away_message.is_some(),
                 input_muted: c.input_muted,
                 output_muted: c.output_muted,
+                client_type: match c.client_type {
+                    tsclientlib::ClientType::Normal => 0,
+                    tsclientlib::ClientType::Query { .. } => 1,
+                },
+                talk_power: c.talk_power,
+                talk_power_granted: c.talk_power_granted,
+                is_priority_speaker: c.is_priority_speaker,
+                is_channel_commander: c.is_channel_commander,
+                is_recording: c.is_recording,
+                input_hardware_enabled: c.input_hardware_enabled,
+                output_hardware_enabled: c.output_hardware_enabled,
+                output_only_muted: c.output_only_muted,
+                phonetic_name: c.phonetic_name.clone(),
+                country_code: c.country_code.clone(),
+                metadata: c.metadata.clone(),
+                avatar_hash: c.avatar_hash.clone(),
                 is_talking: talking
                     .get(&cid)
                     .map(|t| t.elapsed().as_millis() < 500)

@@ -498,6 +498,14 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
   DateTime _lastMicLevelWrite = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastNotification = DateTime.fromMillisecondsSinceEpoch(0);
 
+  /// Master output volume (dB) captured before an audio-focus duck, restored on
+  /// the corresponding regain. Null = not currently ducked.
+  double? _volumeBeforeDuck;
+
+  /// How much to lower the output on a transient focus loss, in dB. The legacy
+  /// client halves the stream volume (≈ −6 dB) whenever another app takes focus.
+  static const _duckDbOffset = 6.0;
+
   @override
   MultiServerState build() {
     ForegroundService.init();
@@ -998,6 +1006,24 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
         final fromName = data['from_client'] as String;
         final st = _stateOf(cid);
         final text = data['message'] as String;
+        // Honor the contact book's ignore flags before storing anything: the
+        // legacy client filters at the service level, before a message reaches
+        // a thread. Private messages honour ignorePrivateChat; channel/server
+        // (public) messages honour ignorePublicChat. Unknown clients fail open.
+        final contact = _contactForClient(cid, fromId);
+        if (contact != null) {
+          final isPrivate = targetMode == 1;
+          final isPublic = targetMode == 2 || targetMode == 3;
+          if ((isPrivate && contact.ignorePrivateChat) ||
+              (isPublic && contact.ignorePublicChat)) {
+            AppLog.d(
+              _tag,
+              'dropped ${targetMode == 1 ? 'private' : 'public'} message '
+              'from contact (ignored)',
+            );
+            break;
+          }
+        }
         // Highlight a message that mentions our own nickname, like the Windows
         // client. Empty text (a server-generated line) is marked as such.
         final flagged =
@@ -1440,7 +1466,35 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
 
   // ─── Audio focus (global) ─────────────────────────────────────────
 
+  /// Duck the output when another app (a call, another voice client) takes
+  /// audio focus. Mirrors the legacy `AudioSessionController.duck()`: capture
+  /// is stopped and the playback level is halved (≈ −6 dB), then restored on
+  /// `_onAudioFocusRegained`. The duck is deliberately not persisted.
+  void _duckMasterVolume() {
+    if (_volumeBeforeDuck != null) return; // already ducked
+    final current = ref.read(masterVolumeProvider).volumeDb;
+    _volumeBeforeDuck = current;
+    ref
+        .read(masterVolumeProvider.notifier)
+        .setVolumeLive((current - _duckDbOffset).clamp(-20.0, 20.0));
+    AppLog.d(
+      _tag,
+      'audio focus lost, ducking output ${current}dB → '
+      '${(current - _duckDbOffset).clamp(-20.0, 20.0)}dB',
+    );
+  }
+
+  /// Restore the ducked output level after focus is regained.
+  void _unduckMasterVolume() {
+    final saved = _volumeBeforeDuck;
+    if (saved == null) return;
+    _volumeBeforeDuck = null;
+    ref.read(masterVolumeProvider.notifier).setVolumeLive(saved);
+    AppLog.d(_tag, 'audio focus regained, unducking output to ${saved}dB');
+  }
+
   void _onAudioFocusLost() {
+    _duckMasterVolume();
     final cid = state.selectedId;
     if (cid != null && _stateOf(cid).connected && !_stateOf(cid).inputMuted) {
       AppLog.i(_tag, 'audio focus lost, muting the microphone');
@@ -1450,6 +1504,7 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
   }
 
   void _onAudioFocusRegained() {
+    _unduckMasterVolume();
     final cid = state.selectedId;
     if (cid == null) return;
     if (!(_rt[cid]?.mutedByFocusLoss ?? false)) return;
@@ -2051,6 +2106,29 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
       final uid = client.uid;
       if (uid == null || uid.isEmpty) continue;
       _applyContactToClient(cid, serverUid, client);
+    }
+  }
+
+  /// Looks up the persisted contact (if any) for a live client on this server.
+  ///
+  /// The contact book is keyed by `contact_<server_uid>_<uid>`. Returns null
+  /// when the client has no saved contact or the record is malformed, so every
+  /// caller can fail open (treat an unknown client as a normal user).
+  ContactSettings? _contactForClient(int cid, int clientId) {
+    final prefs = _prefs;
+    if (prefs == null) return null;
+    final st = _stateOf(cid);
+    final serverUid = st.serverUid;
+    if (serverUid.isEmpty) return null;
+    final client = st.clients.where((c) => c.id == clientId).firstOrNull;
+    final uid = client?.uid;
+    if (uid == null || uid.isEmpty) return null;
+    final raw = prefs.getString('contact_${serverUid}_$uid');
+    if (raw == null) return null;
+    try {
+      return ContactSettings.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+    } catch (_) {
+      return null;
     }
   }
 
@@ -2912,6 +2990,18 @@ class MasterVolumeNotifier extends Notifier<MasterVolumeState> {
     TsNative.setMasterVolume(db);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_prefKey, db);
+  }
+
+  /// Applies a volume to the engine and in-memory state WITHOUT persisting it.
+  ///
+  /// Used by the temporary focus duck/unduck: a transient phone call must lower
+  /// the output for the duration of the call and restore it afterwards, but it
+  /// must not overwrite the value the user chose in settings with the ducked
+  /// value that happens to be live at that moment.
+  void setVolumeLive(double volumeDb) {
+    final db = volumeDb.clamp(-20.0, 20.0);
+    state = state.copyWith(volumeDb: db);
+    TsNative.setMasterVolume(db);
   }
 }
 

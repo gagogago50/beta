@@ -130,6 +130,34 @@ class _ClientListState extends State<ClientList> {
           clipBehavior: Clip.none,
           children: [
             Icon(_clientIcon(client), size: 18, color: _clientColor(client)),
+            // Badge stack: channel commander, priority speaker, recording,
+            // and server-query — each shown as a small corner mark the way the
+            // desktop client overlays its "status" icons.
+            if (client.isChannelCommander)
+              const Positioned(
+                left: 0,
+                top: -5,
+                child: _CornerBadge(icon: Icons.star, color: Color(0xFFF9A825)),
+              ),
+            if (client.isPrioritySpeaker)
+              const Positioned(
+                left: 0,
+                bottom: -5,
+                child: _CornerBadge(
+                  icon: Icons.volume_up,
+                  color: Color(0xFF0288D1),
+                ),
+              ),
+            if (client.isRecording)
+              const Positioned(
+                right: 0,
+                top: -5,
+                child: _CornerBadge(
+                  icon: Icons.fiber_manual_record,
+                  color: Color(0xFFD32F2F),
+                  size: 9,
+                ),
+              ),
             if (client.isTalking)
               Positioned(
                 right: 0,
@@ -145,14 +173,30 @@ class _ClientListState extends State<ClientList> {
           ],
         ),
       ),
-      title: Text(
-        client.nickname,
-        style: TextStyle(
-          color: client.away
-              ? context.ts.textSecondary
-              : context.ts.textPrimary,
-          fontSize: 13,
-        ),
+      title: Row(
+        children: [
+          Flexible(
+            child: Text(
+              client.nickname,
+              style: TextStyle(
+                color: client.away
+                    ? context.ts.textSecondary
+                    : context.ts.textPrimary,
+                fontSize: 13,
+                fontStyle: client.isQuery ? FontStyle.italic : FontStyle.normal,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (client.isQuery)
+            const Padding(
+              padding: EdgeInsets.only(left: 4),
+              child: Text(
+                ' (query)',
+                style: TextStyle(color: Color(0xFF7E57C2), fontSize: 10),
+              ),
+            ),
+        ],
       ),
       subtitle: _groupsLine(client),
       onTap: () => widget.onClientTap?.call(client.id),
@@ -209,16 +253,54 @@ class _ClientListState extends State<ClientList> {
     );
   }
 
+  /// A server query (bot / admin tool) is rendered distinctly so a user can
+  /// tell it apart from a human, matching the desktop client's "Server Query"
+  /// marker. It is never a real participant and has no voice.
+  static const _queryColor = Color(0xFF7E57C2);
+
   IconData _clientIcon(TsClient client) {
+    if (client.isQuery) return Icons.smart_toy;
     if (client.outputMuted) return Icons.headset_off;
     if (client.inputMuted) return Icons.mic_off;
     if (client.away) return Icons.access_time;
+    if (client.isChannelCommander) return Icons.star;
+    if (client.isPrioritySpeaker) return Icons.record_voice_over;
+    if (client.isRecording) return Icons.fiber_manual_record;
     return Icons.person;
   }
 
   Color _clientColor(TsClient client) {
+    if (client.isQuery) return _queryColor;
     if (client.away) return context.ts.textSecondary;
     if (client.inputMuted || client.outputMuted) return context.ts.warning;
+    if (client.isChannelCommander) return context.ts.warning;
+    if (client.isPrioritySpeaker) return context.ts.accent;
     return context.ts.success;
+  }
+}
+
+/// A tiny rounded badge used to overlay a "status" icon on a client row
+/// (channel commander, priority speaker, recording). Wrapped in a Material of
+/// the surface color so it reads as a chip against any theme.
+class _CornerBadge extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final double size;
+
+  const _CornerBadge({required this.icon, required this.color, this.size = 11});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size + 6,
+      height: size + 6,
+      decoration: BoxDecoration(
+        color: context.ts.surface,
+        shape: BoxShape.circle,
+        border: Border.all(color: color, width: 1),
+      ),
+      alignment: Alignment.center,
+      child: Icon(icon, size: size, color: color),
+    );
   }
 }

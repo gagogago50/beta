@@ -4,6 +4,15 @@ import '../l10n/generated/app_localizations.dart';
 import '../models/channel.dart';
 import '../models/app_theme.dart';
 
+/// One pre-flattened row of the channel tree.
+///
+/// The legacy client pre-builds its visible tree (`rebuildVisibleTree`) so a
+/// single `ListView` can virtualise the whole hierarchy instead of recursing
+/// widgets inside a root `Column`, which forces every node to be built and
+/// measured even when far off-screen. We do the same: the tree is flattened
+/// once per mutation and cached until something changes.
+typedef _ChannelRow = ({TsChannel channel, int depth});
+
 /// Channel tree with:
 ///  * an in-tree search that flattens matches;
 ///  * server-order or alphabetical sorting;
@@ -49,12 +58,35 @@ class _ChannelTreeState extends State<ChannelTree> {
   final TextEditingController _search = TextEditingController();
   String _query = '';
 
+  /// Flat, pre-sorted visible-tree cache. Rebuilt only when an input changes
+  /// (channels, favourites, sort, expansion) — not on every theme/widget
+  /// rebuild that re-runs `build`.
+  List<_ChannelRow> _rows = const [];
+  bool _flatDirty = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _flatDirty = true;
+  }
+
+  @override
+  void didUpdateWidget(covariant ChannelTree oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.channels != widget.channels ||
+        oldWidget.favoriteChannelIds != widget.favoriteChannelIds ||
+        oldWidget.sortAlphabetically != widget.sortAlphabetically) {
+      _flatDirty = true;
+    }
+  }
+
   @override
   void dispose() {
     _search.dispose();
     super.dispose();
   }
 
+  /// Orders a channel's children: favourites first, then name or `order`.
   List<TsChannel> _sort(List<TsChannel> list) {
     final fav = widget.favoriteChannelIds;
     final sorted = [...list];
@@ -70,8 +102,49 @@ class _ChannelTreeState extends State<ChannelTree> {
     return sorted;
   }
 
-  List<TsChannel> get _roots =>
-      _sort(widget.channels.where((c) => c.parentId == 0).toList());
+  /// Recursively flattens the visible tree, honouring the expansion set.
+  List<_ChannelRow> _flatten() {
+    final byParent = <int, List<TsChannel>>{};
+    for (final c in widget.channels) {
+      byParent.putIfAbsent(c.parentId, () => []).add(c);
+    }
+    final rows = <_ChannelRow>[];
+    void visit(int parentId, int depth) {
+      final children = _sort(byParent[parentId] ?? const []);
+      for (final ch in children) {
+        rows.add((channel: ch, depth: depth));
+        // Descend only into an expanded node, mirroring the desktop client's
+        // collapsed-by-default sub-channels.
+        if (_expanded.contains(ch.id)) {
+          visit(ch.id, depth + 1);
+        }
+      }
+    }
+
+    visit(0, 0);
+    return rows;
+  }
+
+  /// Rebuilds the cache if any input changed. Returns it whether or not it
+  /// was recomputed, so callers can just read `_rows`.
+  List<_ChannelRow> _ensureFlat() {
+    if (_flatDirty) {
+      _rows = _flatten();
+      _flatDirty = false;
+    }
+    return _rows;
+  }
+
+  void _toggleExpanded(int id, bool expand) {
+    setState(() {
+      if (expand) {
+        _expanded.add(id);
+      } else {
+        _expanded.remove(id);
+      }
+      _flatDirty = true;
+    });
+  }
 
   /// Flat search across every channel, preserving the parent path.
   List<TsChannel> get _matches {
@@ -92,6 +165,9 @@ class _ChannelTreeState extends State<ChannelTree> {
         ),
       );
     }
+    // Always recompute the flat list before rendering so a collapsed/expanded
+    // node reflects immediately, using the memoised value when nothing changed.
+    final rows = _ensureFlat();
     return Column(
       children: [
         _buildToolbar(),
@@ -101,8 +177,11 @@ class _ChannelTreeState extends State<ChannelTree> {
               ? _buildSearchResults(context)
               : ListView.builder(
                   padding: EdgeInsets.zero,
-                  itemCount: _roots.length,
-                  itemBuilder: (context, index) => _buildTile(_roots[index], 0),
+                  itemCount: rows.length,
+                  itemBuilder: (context, index) {
+                    final row = rows[index];
+                    return _buildRow(row.channel, row.depth);
+                  },
                 ),
         ),
       ],
@@ -237,138 +316,111 @@ class _ChannelTreeState extends State<ChannelTree> {
     return above.isEmpty ? parent.name : '$above / ${parent.name}';
   }
 
-  Widget _buildTile(TsChannel channel, int depth) {
-    final children = widget.channels
-        .where((c) => c.parentId == channel.id)
-        .toList();
-    final sortedChildren = _sort(children);
+  /// Renders a single pre-flattened tree row; no recursion, no children
+  /// computed here (they are already in `_rows`).
+  Widget _buildRow(TsChannel channel, int depth) {
+    final hasChildren = widget.channels.any((c) => c.parentId == channel.id);
     final isSelected = channel.id == widget.selectedChannelId;
-    final hasChildren = children.isNotEmpty;
     final isExpanded = _expanded.contains(channel.id);
     final isFavorite = widget.favoriteChannelIds.contains(channel.id);
     final canToggle = widget.onToggleFavorite != null;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Channel row
-        Material(
-          color: isSelected
-              ? context.ts.accent.withValues(alpha: 0.15)
-              : Colors.transparent,
-          child: InkWell(
-            onTap: () {
-              widget.onChannelTap(channel.id);
-              if (hasChildren && !_expanded.contains(channel.id)) {
-                setState(() => _expanded.add(channel.id));
-              }
-            },
-            onLongPress: canToggle
-                ? () => widget.onToggleFavorite!(channel.id, !isFavorite)
-                : null,
-            child: Padding(
-              padding: EdgeInsets.only(
-                left: 8.0 + depth * 20.0,
-                top: 10,
-                bottom: 10,
-                right: 8,
+    return Material(
+      color: isSelected
+          ? context.ts.accent.withValues(alpha: 0.15)
+          : Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          widget.onChannelTap(channel.id);
+          if (hasChildren && !isExpanded) _toggleExpanded(channel.id, true);
+        },
+        onLongPress: canToggle
+            ? () => widget.onToggleFavorite!(channel.id, !isFavorite)
+            : null,
+        child: Padding(
+          padding: EdgeInsets.only(
+            left: 8.0 + depth * 20.0,
+            top: 10,
+            bottom: 10,
+            right: 8,
+          ),
+          child: Row(
+            children: [
+              if (hasChildren)
+                InkWell(
+                  onTap: () => _toggleExpanded(channel.id, !isExpanded),
+                  child: Icon(
+                    isExpanded
+                        ? Icons.keyboard_arrow_down
+                        : Icons.keyboard_arrow_right,
+                    size: 18,
+                    color: context.ts.textSecondary,
+                  ),
+                )
+              else
+                const SizedBox(width: 18),
+              const SizedBox(width: 4),
+              Icon(
+                hasChildren ? Icons.folder : Icons.tag,
+                size: 16,
+                color: isSelected
+                    ? context.ts.accent
+                    : context.ts.textSecondary,
               ),
-              child: Row(
-                children: [
-                  if (hasChildren)
-                    GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          if (_expanded.contains(channel.id)) {
-                            _expanded.remove(channel.id);
-                          } else {
-                            _expanded.add(channel.id);
-                          }
-                        });
-                      },
-                      child: Icon(
-                        isExpanded
-                            ? Icons.keyboard_arrow_down
-                            : Icons.keyboard_arrow_right,
-                        size: 18,
-                        color: context.ts.textSecondary,
-                      ),
-                    )
-                  else
-                    const SizedBox(width: 18),
-                  const SizedBox(width: 4),
-                  Icon(
-                    hasChildren ? Icons.folder : Icons.tag,
-                    size: 16,
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  channel.name,
+                  style: TextStyle(
                     color: isSelected
                         ? context.ts.accent
-                        : context.ts.textSecondary,
+                        : context.ts.textPrimary,
+                    fontWeight: isSelected
+                        ? FontWeight.bold
+                        : FontWeight.normal,
+                    fontSize: 14,
                   ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      channel.name,
-                      style: TextStyle(
-                        color: isSelected
-                            ? context.ts.accent
-                            : context.ts.textPrimary,
-                        fontWeight: isSelected
-                            ? FontWeight.bold
-                            : FontWeight.normal,
-                        fontSize: 14,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  if (isFavorite)
-                    Padding(
-                      padding: EdgeInsets.only(right: 4),
-                      child: Icon(
-                        Icons.star,
-                        size: 14,
-                        color: context.ts.warning,
-                      ),
-                    ),
-                  if (channel.clientCount > 0)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: context.ts.textSecondary.withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        '${channel.clientCount}',
-                        style: TextStyle(
-                          color: isSelected
-                              ? context.ts.accent
-                              : context.ts.textSecondary,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ),
-                  if (widget.onChannelMenu != null)
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                      iconSize: 14,
-                      icon: Icon(
-                        Icons.more_horiz,
-                        color: context.ts.textSecondary,
-                      ),
-                      onPressed: () => widget.onChannelMenu!(channel.id),
-                    ),
-                ],
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-            ),
+              if (isFavorite)
+                Padding(
+                  padding: EdgeInsets.only(right: 4),
+                  child: Icon(Icons.star, size: 14, color: context.ts.warning),
+                ),
+              if (channel.clientCount > 0)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: context.ts.textSecondary.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '${channel.clientCount}',
+                    style: TextStyle(
+                      color: isSelected
+                          ? context.ts.accent
+                          : context.ts.textSecondary,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+              if (widget.onChannelMenu != null)
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  iconSize: 14,
+                  icon: Icon(Icons.more_horiz, color: context.ts.textSecondary),
+                  onPressed: () => widget.onChannelMenu!(channel.id),
+                ),
+            ],
           ),
         ),
-        if (hasChildren && isExpanded)
-          ...sortedChildren.map((ch) => _buildTile(ch, depth + 1)),
-      ],
+      ),
     );
   }
 }
