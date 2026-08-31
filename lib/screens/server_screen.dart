@@ -10,6 +10,7 @@ import '../l10n/generated/app_localizations.dart';
 import '../models/channel.dart';
 import '../models/chat_message.dart';
 import '../models/client.dart';
+import '../models/contact_settings.dart';
 import '../models/file_transfer.dart';
 import '../models/reconnect_policy.dart';
 import '../models/server.dart';
@@ -500,7 +501,11 @@ class _SessionTabState extends ConsumerState<_SessionTab> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
       ),
-      builder: (ctx) => _ClientVolumeSheet(client: client, notifier: notifier),
+      builder: (ctx) => _ClientVolumeSheet(
+        client: client,
+        notifier: notifier,
+        serverUid: conn.serverUid,
+      ),
     );
   }
 
@@ -1715,8 +1720,13 @@ class _TransferTile extends StatelessWidget {
 class _ClientVolumeSheet extends StatefulWidget {
   final TsClient client;
   final TsConnectionNotifier notifier;
+  final String serverUid;
 
-  const _ClientVolumeSheet({required this.client, required this.notifier});
+  const _ClientVolumeSheet({
+    required this.client,
+    required this.notifier,
+    this.serverUid = '',
+  });
 
   @override
   State<_ClientVolumeSheet> createState() => _ClientVolumeSheetState();
@@ -1734,75 +1744,211 @@ class _ClientVolumeSheetState extends State<_ClientVolumeSheet> {
   @override
   Widget build(BuildContext context) {
     final c = widget.client;
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              _ClientAvatar(client: c),
-              const SizedBox(width: 8),
-              Text(
-                c.nickname,
-                style: TextStyle(
-                  color: context.ts.textPrimary,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
+    final al = AppLocalizations.of(context);
+    // If the user saved a custom name / ignore flags for this contact, the
+    // Windows-style "preferred display name" overrides the server nickname.
+    return Consumer(
+      builder: (context, ref, _) {
+        final uid = c.uid ?? '';
+        final k = (serverUid: widget.serverUid, uid: uid);
+        final contactAsync = widget.serverUid.isNotEmpty && uid.isNotEmpty
+            ? ref.watch(contactProvider(k))
+            : null;
+        final contact =
+            contactAsync?.value ??
+            ContactSettings(serverUid: widget.serverUid, uid: uid);
+        final displayName = contact.preferredDisplayName(c.nickname);
+
+        Future<void> update(ContactSettings next) async {
+          await saveContact(next, ref);
+        }
+
+        return SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    _ClientAvatar(client: c),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        displayName,
+                        style: TextStyle(
+                          color: context.ts.textPrimary,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (c.isTalking)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: context.ts.accent.withValues(alpha: 0.3),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          al.talking,
+                          style: TextStyle(
+                            color: context.ts.accent,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
-              ),
-              const Spacer(),
-              if (c.isTalking)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: context.ts.accent.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    AppLocalizations.of(context).talking,
-                    style: TextStyle(color: context.ts.accent, fontSize: 11),
-                  ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Text(
+                      al.volume,
+                      style: TextStyle(
+                        color: context.ts.textSecondary,
+                        fontSize: 12,
+                      ),
+                    ),
+                    Expanded(
+                      child: Slider(
+                        value: _volume,
+                        min: -20.0,
+                        max: 20.0,
+                        divisions: 80,
+                        activeColor: context.ts.accent,
+                        onChanged: (v) {
+                          setState(() => _volume = v);
+                          widget.notifier.setClientVolume(c.id, v);
+                        },
+                      ),
+                    ),
+                    SizedBox(
+                      width: 52,
+                      child: Text(
+                        '${_volume.toStringAsFixed(1)} dB',
+                        style: TextStyle(
+                          color: context.ts.textSecondary,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Text(
-                AppLocalizations.of(context).volume,
-                style: TextStyle(color: context.ts.textSecondary, fontSize: 12),
-              ),
-              Expanded(
-                child: Slider(
-                  value: _volume,
-                  min: -20.0,
-                  max: 20.0,
-                  divisions: 80,
-                  activeColor: context.ts.accent,
-                  onChanged: (v) {
-                    setState(() => _volume = v);
-                    widget.notifier.setClientVolume(c.id, v);
-                  },
-                ),
-              ),
-              SizedBox(
-                width: 52,
-                child: Text(
-                  '${_volume.toStringAsFixed(1)} dB',
+                const Divider(height: 24),
+                Text(
+                  al.contact,
                   style: TextStyle(
-                    color: context.ts.textSecondary,
-                    fontSize: 11,
+                    color: context.ts.textPrimary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 4),
+                // Custom display name (overrides the nickname, Windows-style).
+                Row(
+                  children: [
+                    Icon(
+                      Icons.badge_outlined,
+                      color: context.ts.textSecondary,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextFormField(
+                        initialValue: contact.customName,
+                        style: TextStyle(
+                          color: context.ts.textPrimary,
+                          fontSize: 13,
+                        ),
+                        decoration: InputDecoration(
+                          hintText: al.customName,
+                          hintStyle: TextStyle(color: context.ts.textSecondary),
+                          isDense: true,
+                          border: InputBorder.none,
+                        ),
+                        onFieldSubmitted: (v) =>
+                            update(contact.copyWith(customName: v.trim())),
+                      ),
+                    ),
+                  ],
+                ),
+                SwitchListTile(
+                  value: contact.muted,
+                  onChanged: (v) => update(contact.copyWith(muted: v)),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(
+                    al.contactMuted,
+                    style: TextStyle(
+                      color: context.ts.textPrimary,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                SwitchListTile(
+                  value: contact.ignorePrivateChat,
+                  onChanged: (v) =>
+                      update(contact.copyWith(ignorePrivateChat: v)),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(
+                    al.ignorePrivateChat,
+                    style: TextStyle(
+                      color: context.ts.textPrimary,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                SwitchListTile(
+                  value: contact.ignorePokes,
+                  onChanged: (v) => update(contact.copyWith(ignorePokes: v)),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(
+                    al.ignorePokes,
+                    style: TextStyle(
+                      color: context.ts.textPrimary,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                SwitchListTile(
+                  value: contact.hideAvatar,
+                  onChanged: (v) => update(contact.copyWith(hideAvatar: v)),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(
+                    al.hideAvatar,
+                    style: TextStyle(
+                      color: context.ts.textPrimary,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                SwitchListTile(
+                  value: contact.allowWhispers,
+                  onChanged: (v) => update(contact.copyWith(allowWhispers: v)),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(
+                    al.allowWhispers,
+                    style: TextStyle(
+                      color: context.ts.textPrimary,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }

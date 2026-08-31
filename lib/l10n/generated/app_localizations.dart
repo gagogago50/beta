@@ -1513,6 +1513,48 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'More options'**
   String get toolsMenu;
+
+  /// No description provided for @contact.
+  ///
+  /// In en, this message translates to:
+  /// **'Contact'**
+  String get contact;
+
+  /// No description provided for @customName.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom name'**
+  String get customName;
+
+  /// No description provided for @contactMuted.
+  ///
+  /// In en, this message translates to:
+  /// **'Muted'**
+  String get contactMuted;
+
+  /// No description provided for @ignorePrivateChat.
+  ///
+  /// In en, this message translates to:
+  /// **'Ignore private chat'**
+  String get ignorePrivateChat;
+
+  /// No description provided for @ignorePokes.
+  ///
+  /// In en, this message translates to:
+  /// **'Ignore pokes'**
+  String get ignorePokes;
+
+  /// No description provided for @hideAvatar.
+  ///
+  /// In en, this message translates to:
+  /// **'Hide avatar'**
+  String get hideAvatar;
+
+  /// No description provided for @allowWhispers.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow whispers'**
+  String get allowWhispers;
 }
 
 class _AppLocalizationsDelegate

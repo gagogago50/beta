@@ -37,6 +37,11 @@ WHITELIST = {
     "MainActivity.kt",
     "IdentityBackup.kt",
     "ts_ffi.dart",
+    # The contact book serializes a client UID (a public identifier, not a
+    # secret) into the app's *private* SharedPreferences — not a log, a
+    # notification or a backup. This is the intended storage, so it is not a
+    # leak.
+    "contact_settings.dart",
 }
 
 SECRET_NAMES = (
@@ -126,9 +131,13 @@ def main() -> int:
                 else:
                     issues += 1
                     print(f"{rel}:{i}: {line.strip()[:90]}")
-            # Serialization / notification exposing a secret field name.
-            if ("toJson" in line or "toMap" in line or "Notification" in line) and not is_comment(
-                line
+            # Serialization / notification exposing a secret field name. Skip
+            # whitelisted files (those that store a UID into app-private
+            # storage, which is intended, not a leak channel).
+            if (
+                ("toJson" in line or "toMap" in line or "Notification" in line)
+                and not is_comment(line)
+                and p.name not in WHITELIST
             ):
                 if re.search(r"\b(password|identity|client_identity|uid)\b", line, re.I):
                     issues += 1

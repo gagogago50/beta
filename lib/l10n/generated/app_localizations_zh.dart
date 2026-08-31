@@ -737,4 +737,25 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get toolsMenu => '更多选项';
+
+  @override
+  String get contact => '联系人';
+
+  @override
+  String get customName => '自定义名称';
+
+  @override
+  String get contactMuted => '已静音';
+
+  @override
+  String get ignorePrivateChat => '忽略私聊';
+
+  @override
+  String get ignorePokes => '忽略戳一戳';
+
+  @override
+  String get hideAvatar => '隐藏头像';
+
+  @override
+  String get allowWhispers => '允许耳语';
 }

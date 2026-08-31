@@ -300,5 +300,12 @@
   "whisper": "Whisper (pick targets)",
   "whisperReady": "Whisper ready — tap to talk only to targets",
   "whisperOn": "Whispering — active",
-  "toolsMenu": "More options"
+  "toolsMenu": "More options",
+  "contact": "Contact",
+  "customName": "Custom name",
+  "contactMuted": "Muted",
+  "ignorePrivateChat": "Ignore private chat",
+  "ignorePokes": "Ignore pokes",
+  "hideAvatar": "Hide avatar",
+  "allowWhispers": "Allow whispers"
 }

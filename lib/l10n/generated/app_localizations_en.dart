@@ -754,4 +754,25 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get toolsMenu => 'More options';
+
+  @override
+  String get contact => 'Contact';
+
+  @override
+  String get customName => 'Custom name';
+
+  @override
+  String get contactMuted => 'Muted';
+
+  @override
+  String get ignorePrivateChat => 'Ignore private chat';
+
+  @override
+  String get ignorePokes => 'Ignore pokes';
+
+  @override
+  String get hideAvatar => 'Hide avatar';
+
+  @override
+  String get allowWhispers => 'Allow whispers';
 }

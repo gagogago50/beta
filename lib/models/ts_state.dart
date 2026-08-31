@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/app_locale.dart';
 import '../models/channel.dart';
 import '../models/client.dart';
+import '../models/contact_settings.dart';
 import '../models/file_transfer.dart';
 import '../models/poll_policy.dart';
 import '../models/reconnect_policy.dart';
@@ -2872,6 +2873,30 @@ final masterVolumeProvider =
     NotifierProvider<MasterVolumeNotifier, MasterVolumeState>(
       MasterVolumeNotifier.new,
     );
+
+// ─── Contact settings (per server + user UID) ───────────────────────
+
+/// Loads the contact settings for one server+UID, or a default when none was
+/// saved. Exposed as a family so the client detail and the client list can both
+/// read/write a user's per-contact name, mute and ignore flags.
+/// [ContactStore.save] writes to SharedPreferences; the provider is invalidated
+/// after a write so the UI reflects the new value immediately.
+final contactProvider =
+    FutureProvider.family<ContactSettings, ({String serverUid, String uid})>((
+      ref,
+      key,
+    ) async {
+      final existing = await ContactStore.load(key.serverUid, key.uid);
+      return existing ??
+          ContactSettings(serverUid: key.serverUid, uid: key.uid);
+    });
+
+/// Writes a contact setting and refreshes the provider. Accepts the
+/// [WidgetRef] you get from a `Consumer` builder (Riverpod 2).
+Future<void> saveContact(ContactSettings c, WidgetRef ref) async {
+  await ContactStore.save(c);
+  ref.invalidate(contactProvider((serverUid: c.serverUid, uid: c.uid)));
+}
 
 /// The last successful connection, kept across process death so the home
 /// screen can offer a one-tap resume (C5).

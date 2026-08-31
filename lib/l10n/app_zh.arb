@@ -252,5 +252,12 @@
   "whisper": "耳语（选择目标）",
   "whisperReady": "耳语就绪——点击只对目标说话",
   "whisperOn": "正在耳语",
-  "toolsMenu": "更多选项"
+  "toolsMenu": "更多选项",
+  "contact": "联系人",
+  "customName": "自定义名称",
+  "contactMuted": "已静音",
+  "ignorePrivateChat": "忽略私聊",
+  "ignorePokes": "忽略戳一戳",
+  "hideAvatar": "隐藏头像",
+  "allowWhispers": "允许耳语"
 }
