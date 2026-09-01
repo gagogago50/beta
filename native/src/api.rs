@@ -1487,11 +1487,7 @@ fn handle_control_item(conn_id: crate::ConnectionId, item: StreamItem, con: &mut
                                     .push(crate::TsServerFile {
                                         name: entry.name.clone(),
                                         size: entry.size,
-                                        modified: entry
-                                            .date_time
-                                            .unix_timestamp()
-                                            .map(|t| t.max(0) as u64)
-                                            .unwrap_or(0),
+                                        modified: entry.date_time.unix_timestamp().max(0) as u64,
                                         is_directory: entry.is_file,
                                     });
                             }
