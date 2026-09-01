@@ -1470,6 +1470,65 @@ fn handle_control_item(conn_id: crate::ConnectionId, item: StreamItem, con: &mut
                             }
                         }
                     }
+                    InMessage::FileList(entries) => {
+                        // Each part is one file/directory of the requested
+                        // listing. Accumulate into the per-(channel,path)
+                        // buffer so a single `FileListFinished` can emit the
+                        // whole list in one event instead of flooding Dart.
+                        for entry in entries.iter() {
+                            let channel_id = entry.channel_id.0;
+                            let path = entry.path.clone();
+                            if let Some(state) = crate::session(conn_id) {
+                                let mut guard = state.lock();
+                                guard
+                                    .file_list_buffers
+                                    .entry((channel_id, path))
+                                    .or_default()
+                                    .push(crate::TsServerFile {
+                                        name: entry.name.clone(),
+                                        size: entry.size,
+                                        modified: entry
+                                            .date_time
+                                            .unix_timestamp()
+                                            .map(|t| t.max(0) as u64)
+                                            .unwrap_or(0),
+                                        is_directory: entry.is_file,
+                                    });
+                            }
+                        }
+                    }
+                    InMessage::FileListFinished(finished) => {
+                        // Emit the assembled listing. `request_id` is recovered
+                        // from the pending map keyed by (channel_id, path).
+                        for item in finished.iter() {
+                            let channel_id = item.channel_id.0;
+                            let path = item.path.clone();
+                            let key = (channel_id, path.clone());
+                            let request_id = SESSIONS
+                                .get(&conn_id)
+                                .and_then(|s| {
+                                    s.pending_file_requests.lock().remove(&key)
+                                })
+                                .unwrap_or(0);
+                            let files = crate::session(conn_id)
+                                .and_then(|state| {
+                                    let mut guard = state.lock();
+                                    guard.file_list_buffers.remove(&key)
+                                })
+                                .unwrap_or_default();
+                            push_event(
+                                conn_id,
+                                TsEvent::ServerFileList {
+                                    request_id,
+                                    channel_id: channel_id as u32,
+                                    path,
+                                    ok: true,
+                                    error: None,
+                                    files,
+                                },
+                            );
+                        }
+                    }
                     InMessage::CommandError(errors) => {
                         for error in errors.iter() {
                             if error.id == tsclientlib::TsError::Ok {
@@ -1935,6 +1994,59 @@ async fn event_loop(
                             );
                         }
                     }
+                }
+                Command::RequestFileList {
+                    request_id,
+                    channel_id,
+                    channel_password,
+                    path,
+                } => {
+                    let part = OutFileListRequestPart {
+                        channel_id: ChannelId(channel_id),
+                        channel_password: Cow::Owned(channel_password),
+                        path: Cow::Owned(path),
+                    };
+                    if let Err(error) =
+                        OutFileListRequestMessage::new(&mut std::iter::once(part)).send(&mut con)
+                    {
+                        push_event(
+                            conn_id,
+                            TsEvent::ServerFileList {
+                                request_id,
+                                channel_id: channel_id as u32,
+                                path: String::new(),
+                                ok: false,
+                                error: Some(format!("list request failed: {error}")),
+                                files: Vec::new(),
+                            },
+                        );
+                    }
+                }
+                Command::DeleteFile {
+                    channel_id,
+                    channel_password,
+                    path,
+                } => {
+                    let part = OutDeleteFilePart {
+                        channel_id: ChannelId(channel_id),
+                        channel_password: Cow::Owned(channel_password),
+                        name: Cow::Owned(path),
+                    };
+                    let _ =
+                        OutDeleteFileMessage::new(&mut std::iter::once(part)).send(&mut con);
+                }
+                Command::CreateDirectory {
+                    channel_id,
+                    channel_password,
+                    path,
+                } => {
+                    let part = OutCreateDirectoryPart {
+                        channel_id: ChannelId(channel_id),
+                        channel_password: Cow::Owned(channel_password),
+                        directory_name: Cow::Owned(path),
+                    };
+                    let _ = OutCreateDirectoryMessage::new(&mut std::iter::once(part))
+                        .send(&mut con);
                 }
                 Command::CreateChannel {
                     parent_id,
@@ -2975,6 +3087,155 @@ pub extern "C" fn ts_upload_file(
         return 0;
     }
     transfer_id as u32
+}
+
+// ─── File management (ftgetfilelist / ftdeletefile / ftcreatedir) ────
+
+/// Requests the file listing of a channel directory (`ftgetfilelist`).
+///
+/// Returns a `request_id` (> 0) that the UI uses to match the asynchronous
+/// `ServerFileList` event, or 0 when the request was rejected locally. The
+/// request is correlated server-side by `(channel_id, path)`; only one listing
+/// per directory may be in flight (a newer request supersedes a pending one).
+#[no_mangle]
+pub extern "C" fn ts_list_files(
+    conn_id: crate::ConnectionId,
+    channel_id: u64,
+    path: *const c_char,
+    channel_password: *const c_char,
+) -> u32 {
+    let connected = crate::session(conn_id)
+        .map(|state| state.lock().connected)
+        .unwrap_or(false);
+    if path.is_null() || !connected {
+        return 0;
+    }
+    let path = unsafe { std::ffi::CStr::from_ptr(path) }
+        .to_string_lossy()
+        .trim()
+        .to_string();
+    if path.is_empty() {
+        return 0;
+    }
+    let password = if channel_password.is_null() {
+        String::new()
+    } else {
+        unsafe { std::ffi::CStr::from_ptr(channel_password) }
+            .to_string_lossy()
+            .into_owned()
+    };
+
+    let Some(session) = SESSIONS.get(&conn_id) else {
+        return 0;
+    };
+    let request_id = session.next_request_id.fetch_add(1, Ordering::Relaxed);
+    // Zero is reserved as "no request": skip it if we ever wrap.
+    let request_id = if request_id == 0 {
+        session.next_request_id.fetch_add(1, Ordering::Relaxed)
+    } else {
+        request_id
+    };
+    // Keep a copy of the path for the pending map; the command consumes one.
+    let path_key = path.clone();
+    session
+        .pending_file_requests
+        .lock()
+        .insert((channel_id, path_key.clone()), request_id);
+
+    if queue_command(
+        conn_id,
+        Command::RequestFileList {
+            request_id,
+            channel_id,
+            channel_password: password,
+            path,
+        },
+    ) == 0
+    {
+        if let Some(s) = SESSIONS.get(&conn_id) {
+            s.pending_file_requests.lock().remove(&(channel_id, path_key));
+        }
+        return 0;
+    }
+    request_id
+}
+
+/// Deletes a file from a channel directory (`ftdeletefile`). The server
+/// enforces the file-delete permission and answers with a typed `command_error`
+/// when it is missing.
+#[no_mangle]
+pub extern "C" fn ts_delete_file(
+    conn_id: crate::ConnectionId,
+    channel_id: u64,
+    path: *const c_char,
+    channel_password: *const c_char,
+) -> u8 {
+    let connected = crate::session(conn_id)
+        .map(|state| state.lock().connected)
+        .unwrap_or(false);
+    if path.is_null() || !connected {
+        return 0;
+    }
+    let path = unsafe { std::ffi::CStr::from_ptr(path) }
+        .to_string_lossy()
+        .trim()
+        .to_string();
+    if path.is_empty() {
+        return 0;
+    }
+    let password = if channel_password.is_null() {
+        String::new()
+    } else {
+        unsafe { std::ffi::CStr::from_ptr(channel_password) }
+            .to_string_lossy()
+            .into_owned()
+    };
+    queue_command(
+        conn_id,
+        Command::DeleteFile {
+            channel_id,
+            channel_password: password,
+            path,
+        },
+    )
+}
+
+/// Creates a directory in a channel (`ftcreatedir`).
+#[no_mangle]
+pub extern "C" fn ts_create_directory(
+    conn_id: crate::ConnectionId,
+    channel_id: u64,
+    path: *const c_char,
+    channel_password: *const c_char,
+) -> u8 {
+    let connected = crate::session(conn_id)
+        .map(|state| state.lock().connected)
+        .unwrap_or(false);
+    if path.is_null() || !connected {
+        return 0;
+    }
+    let path = unsafe { std::ffi::CStr::from_ptr(path) }
+        .to_string_lossy()
+        .trim()
+        .to_string();
+    if path.is_empty() {
+        return 0;
+    }
+    let password = if channel_password.is_null() {
+        String::new()
+    } else {
+        unsafe { std::ffi::CStr::from_ptr(channel_password) }
+            .to_string_lossy()
+            .into_owned()
+    };
+    queue_command(
+        conn_id,
+        Command::CreateDirectory {
+            channel_id,
+            channel_password: password,
+            path,
+        },
+    )
 }
 
 // ─── Channel administration (permission-gated) ──────────────────────

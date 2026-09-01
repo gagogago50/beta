@@ -13,6 +13,7 @@ import '../models/channel.dart';
 import '../models/client.dart';
 import '../models/contact_settings.dart';
 import '../models/file_transfer.dart';
+import '../models/server_file.dart';
 import '../models/poll_policy.dart';
 import '../models/reconnect_policy.dart';
 import '../models/chat_message.dart';
@@ -83,6 +84,15 @@ class TsConnectionState {
 
   /// Live file transfers (uploads and downloads) for this session.
   final List<FileTransfer> transfers;
+
+  /// The channel file listing shown in the file browser. Empty when nothing
+  /// has been requested yet. `serverFilePath` is the directory currently
+  /// displayed; `serverFilesLoading` is true while a `ftgetfilelist` is in
+  /// flight; `serverFilesError` carries a human-readable failure.
+  final List<ServerFile> serverFiles;
+  final String serverFilePath;
+  final bool serverFilesLoading;
+  final String? serverFilesError;
   final bool voiceActive;
   final bool inputMuted;
   final bool outputMuted;
@@ -190,6 +200,10 @@ class TsConnectionState {
     this.packetLossPercent = 0.0,
     this.diagMessages = const [],
     this.transfers = const [],
+    this.serverFiles = const [],
+    this.serverFilePath = '/',
+    this.serverFilesLoading = false,
+    this.serverFilesError,
     this.voiceActive = false,
     this.inputMuted = false,
     this.outputMuted = false,
@@ -256,6 +270,10 @@ class TsConnectionState {
     double? packetLossPercent,
     List<String>? diagMessages,
     List<FileTransfer>? transfers,
+    List<ServerFile>? serverFiles,
+    String? serverFilePath,
+    bool? serverFilesLoading,
+    Object? serverFilesError = _sentinel,
     bool? voiceActive,
     bool? inputMuted,
     bool? outputMuted,
@@ -325,6 +343,12 @@ class TsConnectionState {
     packetLossPercent: packetLossPercent ?? this.packetLossPercent,
     diagMessages: diagMessages ?? this.diagMessages,
     transfers: transfers ?? this.transfers,
+    serverFiles: serverFiles ?? this.serverFiles,
+    serverFilePath: serverFilePath ?? this.serverFilePath,
+    serverFilesLoading: serverFilesLoading ?? this.serverFilesLoading,
+    serverFilesError: serverFilesError == _sentinel
+        ? this.serverFilesError
+        : serverFilesError as String?,
     voiceActive: voiceActive ?? this.voiceActive,
     inputMuted: inputMuted ?? this.inputMuted,
     outputMuted: outputMuted ?? this.outputMuted,
@@ -530,6 +554,10 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
   Timer? _pollTimer;
   bool _nativeWakeScheduled = false;
   DateTime _lastRosterRefresh = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// The request_id of the most recent `ftgetfilelist` this session issued,
+  /// so a stale/other `file_list` reply does not clobber the visible panel.
+  final Map<int, int> _lastFileRequestId = {};
   AudioService? _audioService;
   bool _micEnabled = false;
   bool _micGranted = false;
@@ -900,9 +928,9 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
           localPath: data['local_path'] as String? ?? '',
         );
         // Remove the transfer from the live list (completed or failed).
-        final transfers = _stateOf(
-          cid,
-        ).transfers.where((t) => t.transferId != tfId).toList();
+        final transfers = _stateOf(cid).transfers
+            .where((t) => t.transferId != tfId)
+            .toList();
         _setSession(cid, _stateOf(cid).copyWith(transfers: transfers));
         if (data['ok'] != true) {
           AppLog.d(_tag, 'file transfer failed: ${data['error']}');
@@ -922,6 +950,32 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
             bytes: bytes,
             totalBytes: total,
             direction: FileTransferDirection.upload,
+          ),
+        );
+        break;
+
+      case 'file_list':
+        final requestId = data['request_id'] as int? ?? 0;
+        final ok = data['ok'] as bool? ?? false;
+        final error = data['error'] as String?;
+        final path = data['path'] as String? ?? '/';
+        final files = (data['files'] as List<dynamic>? ?? const [])
+            .map((f) => ServerFile.fromJson(f as Map<String, dynamic>))
+            .toList();
+        // Only accept a result if the request_id matches the most recent one
+        // this session asked for (the engine produces one event per finished
+        // request; a stale/other request is a no-op for the visible panel).
+        if (requestId != 0 && requestId != _lastFileRequestId[cid]) {
+          AppLog.d(_tag, 'ignored stale file_list (request $requestId)');
+          break;
+        }
+        _setSession(
+          cid,
+          _stateOf(cid).copyWith(
+            serverFiles: files,
+            serverFilePath: path,
+            serverFilesLoading: false,
+            serverFilesError: ok ? null : (error ?? 'File listing failed'),
           ),
         );
         break;
@@ -1128,9 +1182,9 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
         _setSession(
           cid,
           _stateOf(cid).copyWith(
-            clients: _stateOf(
-              cid,
-            ).clients.where((c) => c.id != leftId).toList(),
+            clients: _stateOf(cid).clients
+                .where((c) => c.id != leftId)
+                .toList(),
           ),
         );
         break;
@@ -1732,9 +1786,8 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
     for (final cid in state.sessions.keys) {
       _setSession(
         cid,
-        _stateOf(
-          cid,
-        ).copyWith(chatHistoryEnabled: enabled, chatRetention: retention),
+        _stateOf(cid)
+            .copyWith(chatHistoryEnabled: enabled, chatRetention: retention),
       );
     }
   }
@@ -2512,6 +2565,65 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
     }
   }
 
+  // ─── File browser (ftgetfilelist / ftdeletefile / ftcreatedir) ─────
+
+  /// Requests a file listing of [path] in the channel currently selected on
+  /// [cid] (or channel 0 for the root when none is selected).
+  void listChannelFiles(int cid, {String path = '/'}) {
+    final st = _stateOf(cid);
+    if (!st.connected) return;
+    final channelId = st.selectedChannelId ?? 0;
+    final requestId = TsNative.listFiles(
+      connectionId: cid,
+      channelId: channelId,
+      path: path,
+    );
+    if (requestId == 0) {
+      _setSession(
+        cid,
+        _stateOf(cid).copyWith(
+          serverFilesLoading: false,
+          serverFilesError: 'Unable to list files',
+        ),
+      );
+      return;
+    }
+    _lastFileRequestId[cid] = requestId;
+    _setSession(
+      cid,
+      _stateOf(cid).copyWith(
+        serverFilePath: path,
+        serverFilesLoading: true,
+        serverFilesError: null,
+      ),
+    );
+  }
+
+  /// Re-lists the directory currently shown in the file browser of [cid].
+  void refreshFilePanel(int cid) {
+    listChannelFiles(cid, path: _stateOf(cid).serverFilePath);
+  }
+
+  /// Deletes a file on the server, then re-lists the current directory.
+  void deleteServerFile(int cid, String path) {
+    if (!_stateOf(cid).connected) return;
+    final channelId = _stateOf(cid).selectedChannelId ?? 0;
+    TsNative.deleteFile(connectionId: cid, channelId: channelId, path: path);
+    refreshFilePanel(cid);
+  }
+
+  /// Creates a directory on the server, then re-lists the current directory.
+  void createChannelDirectory(int cid, String path) {
+    if (!_stateOf(cid).connected) return;
+    final channelId = _stateOf(cid).selectedChannelId ?? 0;
+    TsNative.createDirectory(
+      connectionId: cid,
+      channelId: channelId,
+      path: path,
+    );
+    refreshFilePanel(cid);
+  }
+
   /// Cancels an in-flight transfer (best effort: only a transfer that has not
   /// begun streaming is actually cancelled).
   bool cancelTransfer(int cid, int transferId) {
@@ -2520,9 +2632,9 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
       _setSession(
         cid,
         _stateOf(cid).copyWith(
-          transfers: _stateOf(
-            cid,
-          ).transfers.where((t) => t.transferId != transferId).toList(),
+          transfers: _stateOf(cid).transfers
+              .where((t) => t.transferId != transferId)
+              .toList(),
         ),
       );
     }
@@ -2773,6 +2885,15 @@ class TsConnectionNotifier {
   );
   bool cancelTransfer(int transferId) =>
       _controller.cancelTransfer(connectionId, transferId);
+
+  // File browser.
+  void listChannelFiles({String path = '/'}) =>
+      _controller.listChannelFiles(connectionId, path: path);
+  void refreshFilePanel() => _controller.refreshFilePanel(connectionId);
+  void deleteServerFile(String path) =>
+      _controller.deleteServerFile(connectionId, path);
+  void createChannelDirectory(String path) =>
+      _controller.createChannelDirectory(connectionId, path);
   void createChannel({
     required int parentId,
     required String name,

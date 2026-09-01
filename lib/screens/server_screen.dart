@@ -2,21 +2,25 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../l10n/generated/app_localizations.dart';
 
+import '../models/app_theme.dart';
 import '../models/channel.dart';
 import '../models/chat_message.dart';
 import '../models/client.dart';
 import '../models/contact_settings.dart';
 import '../models/file_transfer.dart';
+import '../models/server_file.dart';
 import '../models/reconnect_policy.dart';
 import '../models/server.dart';
 import '../models/ts_state.dart';
 import '../services/foreground_service.dart';
 import '../services/icon_cache.dart';
+import '../services/ts_ffi.dart';
 import '../widgets/channel_tree.dart';
 import '../widgets/client_list.dart';
 import '../widgets/chat_panel.dart';
@@ -431,9 +435,8 @@ class _SessionTabState extends ConsumerState<_SessionTab> {
           obscureText: true,
           style: TextStyle(color: context.ts.textPrimary),
           decoration: InputDecoration(
-            hintText: AppLocalizations.of(
-              dialogContext,
-            ).channelPasswordOptional,
+            hintText: AppLocalizations.of(dialogContext)
+                .channelPasswordOptional,
           ),
           onSubmitted: (value) => Navigator.pop(dialogContext, value),
         ),
@@ -961,6 +964,21 @@ class _SessionTabState extends ConsumerState<_SessionTab> {
               },
             ),
             ListTile(
+              leading: Icon(Icons.folder_open, color: context.ts.accent),
+              title: Text(
+                'Files',
+                style: TextStyle(color: context.ts.textPrimary, fontSize: 14),
+              ),
+              subtitle: Text(
+                '${conn.serverFiles.length} item(s)',
+                style: TextStyle(color: context.ts.textSecondary, fontSize: 12),
+              ),
+              onTap: () {
+                Navigator.pop(ctx);
+                _openFileBrowser(conn, notifier);
+              },
+            ),
+            ListTile(
               leading: Icon(Icons.network_check, color: context.ts.accent),
               title: Text(
                 al.networkStats,
@@ -988,6 +1006,28 @@ class _SessionTabState extends ConsumerState<_SessionTab> {
           ],
         ),
       ),
+    );
+  }
+
+  /// Opens the file browser for the current channel: lists the directory,
+  /// navigates into sub-directories, downloads, deletes and creates folders.
+  void _openFileBrowser(TsConnectionState conn, TsConnectionNotifier notifier) {
+    final cid = widget.connectionId;
+    // Kick a listing on entry if nothing is shown yet (or the channel changed).
+    if (!conn.serverFilesLoading &&
+        (conn.serverFilePath == '/' ||
+            conn.serverFilesError != null ||
+            conn.serverFiles.isEmpty)) {
+      notifier.listChannelFiles();
+    }
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: context.ts.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+      ),
+      builder: (ctx) => _FileBrowserSheet(connectionId: cid),
     );
   }
 
@@ -2191,6 +2231,291 @@ class _ConnectionProgressState extends State<_ConnectionProgress> {
                   ),
                 ],
               ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The file browser for the current channel (a Riverpod `ConsumerWidget` so it
+/// stays in sync with the `file_list` events that drive the listing).
+///
+/// Lists the channel directory (via `ftgetfilelist`), lets the user navigate
+/// into sub-directories, download a file to the app cache, delete a file and
+/// create a new directory — the same operations the desktop client offers from
+/// its channel context menu.
+class _FileBrowserSheet extends ConsumerWidget {
+  final int connectionId;
+
+  const _FileBrowserSheet({required this.connectionId});
+
+  String _parentOf(String path) {
+    if (path == '/' || path.isEmpty) return '/';
+    final trimmed = path.endsWith('/')
+        ? path.substring(0, path.length - 1)
+        : path;
+    final idx = trimmed.lastIndexOf('/');
+    return idx <= 0 ? '/' : trimmed.substring(0, idx);
+  }
+
+  String _join(String current, String name) {
+    if (current == '/') return '/$name';
+    return '$current/$name';
+  }
+
+  Future<void> _download(
+    BuildContext context,
+    TsConnectionNotifier notifier,
+    TsConnectionState conn,
+    ServerFile file,
+  ) async {
+    final fullPath = conn.serverFilePath == '/'
+        ? '/${file.name}'
+        : '${conn.serverFilePath}/${file.name}';
+    const channel = MethodChannel('com.senlinjun.nek0/audio');
+    String? root;
+    try {
+      root = await channel.invokeMethod<String>('cache_dir');
+    } catch (_) {
+      root = null;
+    }
+    if (root == null || root.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('No download folder')));
+      }
+      return;
+    }
+    final dir = Directory('$root/downloads');
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    final safeName = file.name.replaceAll(RegExp(r'[^A-Za-z0-9_.-]'), '_');
+    final targetPath = '$root/downloads/$safeName';
+    final transferId = TsNative.downloadFile(
+      connectionId: connectionId,
+      channelId: conn.selectedChannelId ?? 0,
+      remotePath: fullPath,
+      targetPath: targetPath,
+      maxBytes: 8 * 1024 * 1024,
+    );
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            transferId == 0
+                ? 'Download could not be started'
+                : 'Downloading to $targetPath',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _promptNewDirectory(
+    BuildContext context,
+    TsConnectionNotifier notifier,
+    TsConnectionState conn,
+  ) async {
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.ts.card,
+        title: const Text('New folder'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: TextStyle(color: context.ts.textPrimary),
+          decoration: const InputDecoration(hintText: 'Folder name'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (name == null || name.isEmpty) return;
+    notifier.createChannelDirectory(_join(conn.serverFilePath, name));
+  }
+
+  Future<void> _confirmDelete(
+    BuildContext context,
+    TsConnectionNotifier notifier,
+    String path,
+  ) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.ts.card,
+        title: const Text('Delete file?'),
+        content: Text('This will delete $path from the server.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) notifier.deleteServerFile(path);
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final session = ref.watch(tsSessionProvider(connectionId));
+    final conn = session.state;
+    final notifier = session.actions;
+
+    return SafeArea(
+      child: SizedBox(
+        height: MediaQuery.of(context).size.height * 0.7,
+        child: Column(
+          children: [
+            // Header: current directory path + up / refresh / new folder / close.
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
+              child: Row(
+                children: [
+                  Icon(Icons.folder_open, size: 20, color: context.ts.accent),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      conn.serverFilePath,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: context.ts.textPrimary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      Icons.arrow_upward,
+                      color: context.ts.textSecondary,
+                    ),
+                    tooltip: 'Up',
+                    onPressed: conn.serverFilePath == '/'
+                        ? null
+                        : () => notifier.listChannelFiles(
+                            path: _parentOf(conn.serverFilePath),
+                          ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.refresh),
+                    tooltip: 'Refresh',
+                    onPressed: notifier.refreshFilePanel,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.create_new_folder),
+                    tooltip: 'New folder',
+                    onPressed: () =>
+                        _promptNewDirectory(context, notifier, conn),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: conn.serverFiles.isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Text(
+                          conn.serverFilesLoading
+                              ? 'Loading…'
+                              : (conn.serverFilesError ??
+                                    'This folder is empty'),
+                          style: TextStyle(
+                            color: context.ts.textSecondary,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    )
+                  : ListView.builder(
+                      padding: EdgeInsets.zero,
+                      itemCount: conn.serverFiles.length,
+                      itemBuilder: (context, index) {
+                        final file = conn.serverFiles[index];
+                        final fullPath = conn.serverFilePath == '/'
+                            ? '/${file.name}'
+                            : '${conn.serverFilePath}/${file.name}';
+                        return ListTile(
+                          dense: true,
+                          leading: Icon(
+                            file.isDirectory
+                                ? Icons.folder
+                                : Icons.insert_drive_file,
+                            size: 18,
+                            color: file.isDirectory
+                                ? context.ts.accent
+                                : context.ts.textSecondary,
+                          ),
+                          title: Text(
+                            file.isDirectory ? '${file.name}/' : file.name,
+                            style: TextStyle(
+                              color: context.ts.textPrimary,
+                              fontSize: 13,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(
+                            file.isDirectory ? 'Folder' : file.sizeLabel,
+                            style: TextStyle(
+                              color: context.ts.textSecondary,
+                              fontSize: 11,
+                            ),
+                          ),
+                          onTap: file.isDirectory
+                              ? () => notifier.listChannelFiles(
+                                  path: _join(conn.serverFilePath, file.name),
+                                )
+                              : () => _download(context, notifier, conn, file),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (!file.isDirectory)
+                                IconButton(
+                                  icon: Icon(
+                                    Icons.download,
+                                    color: context.ts.accent,
+                                    size: 18,
+                                  ),
+                                  onPressed: () =>
+                                      _download(context, notifier, conn, file),
+                                ),
+                              IconButton(
+                                icon: Icon(
+                                  Icons.delete_outline,
+                                  color: context.ts.warning,
+                                  size: 18,
+                                ),
+                                onPressed: () =>
+                                    _confirmDelete(context, notifier, fullPath),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
             ),
           ],
         ),

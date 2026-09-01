@@ -301,3 +301,30 @@ Résumé (voir `docs/PHASE-23-METADONNEES-CANAUX-WELCOME-HOST-TALKPOWER.md`).
 ### (E) Droit de parole — **fait**
 - `TsConnectionState.canTalkInCurrentChannel` : `talk_power_granted` OU
   (`talk_power >= needed_talk_power`) sinon faux. Testé dans `test/channel_metadata_test.dart`.
+
+## 18. Phase 24 — gestionnaire de fichiers serveur (`ftgetfilelist`/`ftdeletefile`/`ftcreatedir`)
+
+Résumé (voir `docs/PHASE-24-GESTIONNAIRE-FICHIERS.md`).
+
+### (A) Protocole observé (Messages.toml)
+`FileListRequest` (`ftgetfilelist` cid cpw path) → `FileList` (… name size datetime type@ft) ×N
+puis `FileListFinished`. `DeleteFile` (`ftdeletefile` cid cpw name), `CreateDirectory`
+(`ftcreatedir` cid cpw dirname).
+
+### (B) Mapping de champs générés (codegen)
+`cid→channel_id`, `cpw→channel_password`, `path→path`, `dirname→directory_name`,
+`name→name`, `size→size(u64)`, `datetime→datetime(OffsetDateTime)`,
+`type@ft→is_file(bool)`. Côté c2s les champs `str` sont `Cow<str>` ; côté s2c `String`.
+
+### (C) Rust
+- `TsServerFile` + `TsEvent::ServerFileList` + commandes `RequestFileList`/`DeleteFile`/
+  `CreateDirectory` ; `Session.pending_file_requests` ; `TsConnection.file_list_buffers` ;
+  FFI `ts_list_files`/`ts_delete_file`/`ts_create_directory` ; handler
+  `InMessage::FileList`/`FileListFinished` → événement `file_list`.
+
+### (D) Dart
+- `ServerFile`, `TsNative.listFiles`/`deleteFile`/`createDirectory`, état
+  `serverFiles`/`serverFilePath`/`serverFilesLoading`/`serverFilesError` (corrélation par
+  `request_id`), `_FileBrowserSheet` réactif.
+
+> **Reste** : `ftgetfileinfo`, `ftrenamefile`, copie, validation appareil.

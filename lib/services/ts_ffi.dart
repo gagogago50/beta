@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io' show Platform;
+
 import 'package:ffi/ffi.dart';
 
 import 'app_log.dart';
@@ -23,22 +24,20 @@ DynamicLibrary _loadLib() {
 
 // ts_connect(address, nickname, channel, server_password, channel_password)
 // -> *char (JSON) carrying the new `connection_id`
-typedef _ConnectNative =
-    Pointer<Utf8> Function(
-      Pointer<Utf8> address,
-      Pointer<Utf8> nickname,
-      Pointer<Utf8> channel,
-      Pointer<Utf8> password,
-      Pointer<Utf8> channelPassword,
-    );
-typedef _ConnectDart =
-    Pointer<Utf8> Function(
-      Pointer<Utf8> address,
-      Pointer<Utf8> nickname,
-      Pointer<Utf8> channel,
-      Pointer<Utf8> password,
-      Pointer<Utf8> channelPassword,
-    );
+typedef _ConnectNative = Pointer<Utf8> Function(
+  Pointer<Utf8> address,
+  Pointer<Utf8> nickname,
+  Pointer<Utf8> channel,
+  Pointer<Utf8> password,
+  Pointer<Utf8> channelPassword,
+);
+typedef _ConnectDart = Pointer<Utf8> Function(
+  Pointer<Utf8> address,
+  Pointer<Utf8> nickname,
+  Pointer<Utf8> channel,
+  Pointer<Utf8> password,
+  Pointer<Utf8> channelPassword,
+);
 
 // ts_disconnect(connection_id) -> *char (JSON)
 typedef _DisconnectNative = Pointer<Utf8> Function(Uint64);
@@ -47,10 +46,12 @@ typedef _DisconnectDart = Pointer<Utf8> Function(int);
 // Edge-triggered wake-up callback. Event payloads remain in Rust and are
 // drained with ts_poll_events().
 typedef _EventNotifierNative = Void Function();
-typedef _SetEventNotifierNative =
-    Void Function(Pointer<NativeFunction<_EventNotifierNative>> callback);
-typedef _SetEventNotifierDart =
-    void Function(Pointer<NativeFunction<_EventNotifierNative>> callback);
+typedef _SetEventNotifierNative = Void Function(
+  Pointer<NativeFunction<_EventNotifierNative>> callback,
+);
+typedef _SetEventNotifierDart = void Function(
+  Pointer<NativeFunction<_EventNotifierNative>> callback,
+);
 
 // ts_cancel_connect(connection_id) -> bool
 typedef _CancelConnectNative = Uint8 Function(Uint64);
@@ -81,8 +82,11 @@ typedef _SendServerMsgNative = Uint8 Function(Uint64, Pointer<Utf8>);
 typedef _SendServerMsgDart = int Function(int, Pointer<Utf8>);
 
 // ts_move_to_channel(connection_id, channel_id, password) -> bool
-typedef _MoveToChannelNative =
-    Uint8 Function(Uint64, Uint32, Pointer<Utf8> password);
+typedef _MoveToChannelNative = Uint8 Function(
+  Uint64,
+  Uint32,
+  Pointer<Utf8> password,
+);
 typedef _MoveToChannelDart = int Function(int, int, Pointer<Utf8> password);
 
 // ts_set_muted(connection_id, input_muted, output_muted) -> bool
@@ -135,30 +139,43 @@ typedef _SetLogLevelDart = int Function(int);
 
 // ts_download_file(connection_id, channel_id, remote_path, channel_password,
 //                  target, max) -> u32
-typedef _DownloadFileNative =
-    Uint32 Function(
-      Uint64,
-      Uint64,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Uint64,
-    );
-typedef _DownloadFileDart =
-    int Function(int, int, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, int);
+typedef _DownloadFileNative = Uint32 Function(
+  Uint64,
+  Uint64,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  Uint64,
+);
+typedef _DownloadFileDart = int Function(
+  int,
+  int,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  int,
+);
 
 // ts_cancel_file_transfer(connection_id, id) -> bool
 typedef _CancelTransferNative = Uint8 Function(Uint64, Uint32);
 typedef _CancelTransferDart = int Function(int, int);
 
 // ts_kick_client(connection_id, client_id, from_server, reason) -> bool
-typedef _KickClientNative =
-    Uint8 Function(Uint64, Uint16, Uint8, Pointer<Utf8>);
+typedef _KickClientNative = Uint8 Function(
+  Uint64,
+  Uint16,
+  Uint8,
+  Pointer<Utf8>,
+);
 typedef _KickClientDart = int Function(int, int, int, Pointer<Utf8>);
 
 // ts_ban_client(connection_id, client_id, seconds, reason) -> bool
-typedef _BanClientNative =
-    Uint8 Function(Uint64, Uint16, Uint64, Pointer<Utf8>);
+typedef _BanClientNative = Uint8 Function(
+  Uint64,
+  Uint16,
+  Uint64,
+  Pointer<Utf8>,
+);
 typedef _BanClientDart = int Function(int, int, int, Pointer<Utf8>);
 
 // ts_poke_client(connection_id, client_id, message) -> bool
@@ -166,8 +183,12 @@ typedef _PokeClientNative = Uint8 Function(Uint64, Uint16, Pointer<Utf8>);
 typedef _PokeClientDart = int Function(int, int, Pointer<Utf8>);
 
 // ts_move_client(connection_id, client_id, channel_id, password) -> bool
-typedef _MoveClientNative =
-    Uint8 Function(Uint64, Uint16, Uint64, Pointer<Utf8>);
+typedef _MoveClientNative = Uint8 Function(
+  Uint64,
+  Uint16,
+  Uint64,
+  Pointer<Utf8>,
+);
 typedef _MoveClientDart = int Function(int, int, int, Pointer<Utf8>);
 
 // ts_set_away(connection_id, away, message) -> bool
@@ -216,74 +237,102 @@ typedef _GetWhisperStatusDart = Pointer<Utf8> Function(int);
 
 // ts_upload_file(connection_id, channel_id, remote_path, channel_password,
 //                source_path, overwrite) -> u32
-typedef _UploadFileNative =
-    Uint32 Function(
-      Uint64,
-      Uint64,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Uint8,
-    );
-typedef _UploadFileDart =
-    int Function(int, int, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, int);
+typedef _UploadFileNative = Uint32 Function(
+  Uint64,
+  Uint64,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  Uint8,
+);
+typedef _UploadFileDart = int Function(
+  int,
+  int,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  int,
+);
+
+// ts_list_files(connection_id, channel_id, path, channel_password) -> u32
+typedef _ListFilesNative = Uint32 Function(
+  Uint64,
+  Uint64,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+);
+typedef _ListFilesDart = int Function(int, int, Pointer<Utf8>, Pointer<Utf8>);
+
+// ts_delete_file(connection_id, channel_id, path, channel_password) -> bool
+typedef _DeleteFileNative = Uint8 Function(
+  Uint64,
+  Uint64,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+);
+typedef _DeleteFileDart = int Function(int, int, Pointer<Utf8>, Pointer<Utf8>);
+
+// ts_create_directory(connection_id, channel_id, path, channel_password) -> bool
+typedef _CreateDirNative = Uint8 Function(
+  Uint64,
+  Uint64,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+);
+typedef _CreateDirDart = int Function(int, int, Pointer<Utf8>, Pointer<Utf8>);
 
 // ts_create_channel(connection_id, parent_id, name, topic, description,
 //                   password, max_clients, permanent, semi_permanent) -> bool
-typedef _CreateChannelNative =
-    Uint8 Function(
-      Uint64,
-      Uint64,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Int32,
-      Uint8,
-      Uint8,
-    );
-typedef _CreateChannelDart =
-    int Function(
-      int,
-      int,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      int,
-      int,
-      int,
-    );
+typedef _CreateChannelNative = Uint8 Function(
+  Uint64,
+  Uint64,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  Int32,
+  Uint8,
+  Uint8,
+);
+typedef _CreateChannelDart = int Function(
+  int,
+  int,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  int,
+  int,
+  int,
+);
 
 // ts_edit_channel(connection_id, channel_id, name, topic, description,
 //                 password, has_password, max_clients, permanent, semi_permanent)
 // -> bool
-typedef _EditChannelNative =
-    Uint8 Function(
-      Uint64,
-      Uint64,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Int32,
-      Int32,
-      Int32,
-      Int32,
-    );
-typedef _EditChannelDart =
-    int Function(
-      int,
-      int,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      int,
-      int,
-      int,
-      int,
-    );
+typedef _EditChannelNative = Uint8 Function(
+  Uint64,
+  Uint64,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  Int32,
+  Int32,
+  Int32,
+  Int32,
+);
+typedef _EditChannelDart = int Function(
+  int,
+  int,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  int,
+  int,
+  int,
+  int,
+);
 
 // ts_delete_channel(connection_id, channel_id, force) -> bool
 typedef _DeleteChannelNative = Uint8 Function(Uint64, Uint64, Uint8);
@@ -435,6 +484,15 @@ final _getWhisperStatus = _lib
     );
 final _uploadFile = _lib.lookupFunction<_UploadFileNative, _UploadFileDart>(
   'ts_upload_file',
+);
+final _listFiles = _lib.lookupFunction<_ListFilesNative, _ListFilesDart>(
+  'ts_list_files',
+);
+final _deleteFile = _lib.lookupFunction<_DeleteFileNative, _DeleteFileDart>(
+  'ts_delete_file',
+);
+final _createDir = _lib.lookupFunction<_CreateDirNative, _CreateDirDart>(
+  'ts_create_directory',
 );
 final _createChannel = _lib
     .lookupFunction<_CreateChannelNative, _CreateChannelDart>(
@@ -913,6 +971,60 @@ class TsNative {
     } finally {
       _freeInputString(remotePtr);
       _freeInputString(sourcePtr);
+      _freeInputString(passwordPtr);
+    }
+  }
+
+  /// Requests the file listing of a channel directory (`ftgetfilelist`).
+  ///
+  /// Returns the `request_id` that the asynchronous `file_list` event carries
+  /// back, or 0 when the request was rejected locally.
+  static int listFiles({
+    required int connectionId,
+    required int channelId,
+    required String path,
+    String? channelPassword,
+  }) {
+    final pathPtr = _strToPtr(path);
+    final passwordPtr = _strToPtr(channelPassword);
+    try {
+      return _listFiles(connectionId, channelId, pathPtr, passwordPtr);
+    } finally {
+      _freeInputString(pathPtr);
+      _freeInputString(passwordPtr);
+    }
+  }
+
+  /// Deletes a file from a channel directory (`ftdeletefile`).
+  static bool deleteFile({
+    required int connectionId,
+    required int channelId,
+    required String path,
+    String? channelPassword,
+  }) {
+    final pathPtr = _strToPtr(path);
+    final passwordPtr = _strToPtr(channelPassword);
+    try {
+      return _deleteFile(connectionId, channelId, pathPtr, passwordPtr) != 0;
+    } finally {
+      _freeInputString(pathPtr);
+      _freeInputString(passwordPtr);
+    }
+  }
+
+  /// Creates a directory in a channel (`ftcreatedir`).
+  static bool createDirectory({
+    required int connectionId,
+    required int channelId,
+    required String path,
+    String? channelPassword,
+  }) {
+    final pathPtr = _strToPtr(path);
+    final passwordPtr = _strToPtr(channelPassword);
+    try {
+      return _createDir(connectionId, channelId, pathPtr, passwordPtr) != 0;
+    } finally {
+      _freeInputString(pathPtr);
       _freeInputString(passwordPtr);
     }
   }

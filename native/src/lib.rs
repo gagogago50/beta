@@ -90,6 +90,26 @@ pub enum Command {
         size: u64,
         overwrite: bool,
     },
+    /// Lists the files of a channel directory (`ftgetfilelist`). The engine
+    /// answers with a `ServerFileList` event once the server finishes.
+    RequestFileList {
+        request_id: u32,
+        channel_id: u64,
+        channel_password: String,
+        path: String,
+    },
+    /// Deletes a file from a channel directory (`ftdeletefile`).
+    DeleteFile {
+        channel_id: u64,
+        channel_password: String,
+        path: String,
+    },
+    /// Creates a channel directory (`ftcreatedir`).
+    CreateDirectory {
+        channel_id: u64,
+        channel_password: String,
+        path: String,
+    },
     /// Creates a channel in [parent_id] (0 = the root). The server enforces
     /// the `b_channel_create_*` permission.
     CreateChannel {
@@ -166,6 +186,12 @@ impl Command {
             // Cheap on the command channel: the payload travels on a separate
             // TCP connection, only the handshake is a command.
             Command::DownloadFile { .. } | Command::UploadFile { .. } => 1.0,
+            // File management (list / delete / mkdir) is a normal control
+            // command; price it like a file-handshake so a stuck file browser
+            // cannot flood the server.
+            Command::RequestFileList { .. }
+            | Command::DeleteFile { .. }
+            | Command::CreateDirectory { .. } => 1.0,
             // Channel administration is audited and permission-gated; price it
             // like a text message so a stuck UI cannot create a flood of
             // channels.
@@ -188,6 +214,10 @@ impl Command {
                 | (Command::SetMuted { .. }, Command::SetMuted { .. })
                 | (Command::SetAway { .. }, Command::SetAway { .. })
                 | (Command::SetNickname { .. }, Command::SetNickname { .. })
+                | (
+                    Command::RequestFileList { .. },
+                    Command::RequestFileList { .. }
+                )
                 | (
                     Command::SetChannelCommander { .. },
                     Command::SetChannelCommander { .. }
@@ -347,7 +377,13 @@ pub struct Session {
     /// `client_filetransfer_id` chosen by the engine). Removed once the stream
     /// is handed over to the upload task.
     pub upload_jobs: Mutex<HashMap<u16, UploadJob>>,
+    /// In-flight `ftgetfilelist` requests, keyed by `(channel_id, path)` so the
+    /// engine can correlate the multi-part `FileList`/`FileListFinished` answer
+    /// back to the `request_id` handed to Dart.
+    pub pending_file_requests: Mutex<HashMap<(u64, String), u32>>,
     pub next_transfer_id: AtomicU32,
+    /// Monotonic source of file-list request ids.
+    pub next_request_id: AtomicU32,
     /// Host part of the address the user connected to. Used as the fallback
     /// target for file transfers when the server does not pin an IP.
     pub server_host: Mutex<String>,
@@ -372,7 +408,9 @@ impl Session {
             command_budget: Mutex::new(CommandBudget::new(Instant::now())),
             pending_transfers: Mutex::new(HashMap::new()),
             upload_jobs: Mutex::new(HashMap::new()),
+            pending_file_requests: Mutex::new(HashMap::new()),
             next_transfer_id: AtomicU32::new(1),
+            next_request_id: AtomicU32::new(1),
             server_host: Mutex::new(String::new()),
             generation: id,
             event_loop_alive: AtomicBool::new(false),
@@ -563,6 +601,19 @@ pub enum TsEvent {
         bytes: u64,
         total_bytes: u64,
     },
+    /// Result of a `ftgetfilelist` request for one channel directory. Emitted
+    /// when the server sends the terminating `FileListFinished` part. `ok` is
+    /// false when the request was dropped locally or matched no pending reply.
+    #[serde(rename = "file_list")]
+    ServerFileList {
+        request_id: u32,
+        channel_id: u32,
+        path: String,
+        /// `true` = the server answered with a full listing; `false` = error.
+        ok: bool,
+        error: Option<String>,
+        files: Vec<TsServerFile>,
+    },
     /// Outgoing commands are being paced to stay under the server's flood
     /// threshold. `pending` is the current backlog.
     #[serde(rename = "command_throttled")]
@@ -629,6 +680,17 @@ impl ConnectFailure {
             retryable: self.retryable,
         }
     }
+}
+
+/// One entry of a server channel's file listing (`ftgetfilelist`).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TsServerFile {
+    pub name: String,
+    pub size: u64,
+    /// Seconds-since-epoch of the last modification, 0 when unknown.
+    pub modified: u64,
+    /// `true` for a directory, `false` for a regular file.
+    pub is_directory: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -821,6 +883,10 @@ pub struct TsConnection {
     /// Number of incoming whisper frames dropped by the allow list since
     /// the last connect. Purely diagnostic, surfaced to the UI.
     pub whisper_ignored_count: u64,
+    /// Buffers for an in-flight `ftgetfilelist` request, keyed by
+    /// `(channel_id, path)`. Each `FileList` part appends one entry; the
+    /// matching `FileListFinished` emits the assembled list and clears it.
+    pub file_list_buffers: HashMap<(u64, String), Vec<TsServerFile>>,
 }
 
 impl TsConnection {
@@ -857,6 +923,7 @@ impl TsConnection {
             whisper_allow_mode: 0,
             whisper_allowed_uids: HashSet::new(),
             whisper_ignored_count: 0,
+            file_list_buffers: HashMap::new(),
         }
     }
 }
