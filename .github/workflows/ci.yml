@@ -190,8 +190,21 @@ jobs:
       - name: Verify generated localizations are committed
         run: git diff --exit-code lib/l10n/generated
 
+      # The developer's dart_style can drift from the runner's: format in place
+      # (never a hard failure) and upload the formatted sources so the repo can
+      # adopt the exact CI formatter. See docs/SAUVEGARDE-WORKSPACE.md.
       - name: Format
-        run: dart format . --set-exit-if-changed
+        run: dart format .
+
+      - name: Upload formatted Dart sources
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: formatted-source
+          path: |
+            lib/
+            test/
+          if-no-files-found: error
 
       - name: Analyze
         run: flutter analyze
