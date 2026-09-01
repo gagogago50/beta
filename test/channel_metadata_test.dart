@@ -59,7 +59,12 @@ void main() {
         channels: [
           const TsChannel(id: 1, name: 'A', parentId: 0),
           // The selected channel; neededTalkPower is applied below.
-          TsChannel(id: 2, name: 'B', parentId: 0, neededTalkPower: neededTalkPower),
+          TsChannel(
+            id: 2,
+            name: 'B',
+            parentId: 0,
+            neededTalkPower: neededTalkPower,
+          ),
         ],
         clients: [
           TsClient(

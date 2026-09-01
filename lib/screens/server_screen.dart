@@ -431,9 +431,8 @@ class _SessionTabState extends ConsumerState<_SessionTab> {
           obscureText: true,
           style: TextStyle(color: context.ts.textPrimary),
           decoration: InputDecoration(
-            hintText: AppLocalizations.of(
-              dialogContext,
-            ).channelPasswordOptional,
+            hintText: AppLocalizations.of(dialogContext)
+                .channelPasswordOptional,
           ),
           onSubmitted: (value) => Navigator.pop(dialogContext, value),
         ),
@@ -1019,23 +1018,14 @@ class _SessionTabState extends ConsumerState<_SessionTab> {
                 const SizedBox(height: 10),
                 _infoBadges(channel),
                 const SizedBox(height: 10),
-                _infoRow(
-                  Icons.record_voice_over,
-                  _codecLabel(channel.codec),
-                ),
-                _infoRow(
-                  Icons.group,
-                  _maxClientsLabel(channel),
-                ),
+                _infoRow(Icons.record_voice_over, _codecLabel(channel.codec)),
+                _infoRow(Icons.group, _maxClientsLabel(channel)),
                 if (channel.neededTalkPower > 0)
                   _infoRow(
                     Icons.graphic_eq,
                     'Talk power required: ${channel.neededTalkPower}',
                   ),
-                _infoRow(
-                  Icons.payments,
-                  _persistenceLabel(channel),
-                ),
+                _infoRow(Icons.payments, _persistenceLabel(channel)),
               ] else
                 Text(
                   AppLocalizations.of(ctx).noChannelInfo,
@@ -1097,10 +1087,7 @@ class _SessionTabState extends ConsumerState<_SessionTab> {
             ),
             child: Text(
               label,
-              style: TextStyle(
-                color: context.ts.textSecondary,
-                fontSize: 11,
-              ),
+              style: TextStyle(color: context.ts.textSecondary, fontSize: 11),
             ),
           ),
       ],
