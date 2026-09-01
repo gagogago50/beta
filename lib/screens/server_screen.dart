@@ -31,7 +31,6 @@ import '../widgets/spotlight_tour.dart';
 import '../widgets/status_panel.dart';
 import '../widgets/voice_settings_panel.dart';
 import '../widgets/whisper_panel.dart';
-import '../models/app_theme.dart';
 
 /// Multi-server view: one tab per connected/connecting server, plus an action
 /// to connect an extra server from the saved bookmarks.
@@ -435,8 +434,9 @@ class _SessionTabState extends ConsumerState<_SessionTab> {
           obscureText: true,
           style: TextStyle(color: context.ts.textPrimary),
           decoration: InputDecoration(
-            hintText: AppLocalizations.of(dialogContext)
-                .channelPasswordOptional,
+            hintText: AppLocalizations.of(
+              dialogContext,
+            ).channelPasswordOptional,
           ),
           onSubmitted: (value) => Navigator.pop(dialogContext, value),
         ),
@@ -2283,8 +2283,9 @@ class _FileBrowserSheet extends ConsumerWidget {
     }
     if (root == null || root.isEmpty) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('No download folder')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('No download folder')));
       }
       return;
     }

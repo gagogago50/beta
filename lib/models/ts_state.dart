@@ -928,9 +928,9 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
           localPath: data['local_path'] as String? ?? '',
         );
         // Remove the transfer from the live list (completed or failed).
-        final transfers = _stateOf(cid).transfers
-            .where((t) => t.transferId != tfId)
-            .toList();
+        final transfers = _stateOf(
+          cid,
+        ).transfers.where((t) => t.transferId != tfId).toList();
         _setSession(cid, _stateOf(cid).copyWith(transfers: transfers));
         if (data['ok'] != true) {
           AppLog.d(_tag, 'file transfer failed: ${data['error']}');
@@ -1182,9 +1182,9 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
         _setSession(
           cid,
           _stateOf(cid).copyWith(
-            clients: _stateOf(cid).clients
-                .where((c) => c.id != leftId)
-                .toList(),
+            clients: _stateOf(
+              cid,
+            ).clients.where((c) => c.id != leftId).toList(),
           ),
         );
         break;
@@ -1786,8 +1786,9 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
     for (final cid in state.sessions.keys) {
       _setSession(
         cid,
-        _stateOf(cid)
-            .copyWith(chatHistoryEnabled: enabled, chatRetention: retention),
+        _stateOf(
+          cid,
+        ).copyWith(chatHistoryEnabled: enabled, chatRetention: retention),
       );
     }
   }
@@ -2632,9 +2633,9 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
       _setSession(
         cid,
         _stateOf(cid).copyWith(
-          transfers: _stateOf(cid).transfers
-              .where((t) => t.transferId != transferId)
-              .toList(),
+          transfers: _stateOf(
+            cid,
+          ).transfers.where((t) => t.transferId != transferId).toList(),
         ),
       );
     }
