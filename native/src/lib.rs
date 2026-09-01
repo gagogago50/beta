@@ -478,6 +478,18 @@ pub enum TsEvent {
         /// hash). Used to scope caches — a server name can change, this
         /// cannot.
         server_uid: String,
+        /// `virtualserver_welcomemessage`: shown to every new client on connect.
+        welcome_message: String,
+        /// `virtualserver_hostmessage`: a server-operator notice.
+        host_message: String,
+        /// `virtualserver_hostmessage_mode`: 0 = none, 1 = modal, 2 = chat,
+        /// 3 = disconnect.
+        host_message_mode: u8,
+        /// `virtualserver_maxclients`: capacity of the virtual server.
+        max_clients: u32,
+        /// `virtualserver_needed_identity_security_level`: the identity level
+        /// this server requires; a lower level is refused.
+        needed_identity_security_level: u32,
     },
     #[serde(rename = "disconnected")]
     Disconnected {
@@ -628,6 +640,28 @@ pub struct TsChannel {
     pub has_password: bool,
     pub client_count: u32,
     pub order: u32,
+    /// Talk power required to speak in this channel (`channel_needed_talk_power`).
+    pub needed_talk_power: i32,
+    /// Maximum number of clients: `-1` = unlimited, `-2` = inherited, else the cap.
+    pub max_clients: i32,
+    /// TeamSpeak codec id: 0=Speex NB, 1=Speex WB, 2=Speex UWB, 3=Celt mono,
+    /// 4=Opus voice, 5=Opus music.
+    pub codec: u8,
+    /// Codec quality 0..10, when the server reports it.
+    pub codec_quality: u8,
+    /// 0 = temporary (deleted when empty), 1 = permanent (survives restart),
+    /// 2 = semi-permanent (deleted on server restart).
+    pub channel_type: u8,
+    /// Whether this is the server's default channel (new users land here).
+    pub is_default: bool,
+    /// Whether the channel is private (`channel_flag_private`).
+    pub is_private: bool,
+    /// Whether we are subscribed to this channel (we hear it).
+    pub subscribed: bool,
+    /// Channel icon id, 0 when the channel has none.
+    pub icon_id: u32,
+    /// Whether the channel's voice is transmitted unencrypted.
+    pub is_unencrypted: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

@@ -45,6 +45,24 @@ class TsConnectionState {
   /// that must not leak between servers, like group icons.
   final String serverUid;
   final String voiceEncryptionMode;
+
+  /// `virtualserver_welcomemessage`: shown to every new client on connect.
+  final String welcomeMessage;
+
+  /// `virtualserver_hostmessage`: a server-operator notice.
+  final String hostMessage;
+
+  /// `virtualserver_hostmessage_mode`: 0 = none, 1 = log (show in chat),
+  /// 2 = modal, 3 = modal + disconnect.
+  final int hostMessageMode;
+
+  /// `virtualserver_maxclients`: capacity of the virtual server.
+  final int maxClients;
+
+  /// `virtualserver_needed_identity_security_level`: the identity level the
+  /// server requires; a lower level is refused during the handshake.
+  final int neededIdentitySecurityLevel;
+
   final String nickname;
   final int ownClientId;
   final List<TsChannel> channels;
@@ -151,6 +169,11 @@ class TsConnectionState {
     this.serverName = '',
     this.serverUid = '',
     this.voiceEncryptionMode = 'Unknown',
+    this.welcomeMessage = '',
+    this.hostMessage = '',
+    this.hostMessageMode = 0,
+    this.maxClients = 0,
+    this.neededIdentitySecurityLevel = 0,
     this.nickname = '',
     this.ownClientId = 0,
     this.channels = const [],
@@ -212,6 +235,11 @@ class TsConnectionState {
     String? serverName,
     String? serverUid,
     String? voiceEncryptionMode,
+    String? welcomeMessage,
+    String? hostMessage,
+    int? hostMessageMode,
+    int? maxClients,
+    int? neededIdentitySecurityLevel,
     String? nickname,
     int? ownClientId,
     List<TsChannel>? channels,
@@ -273,6 +301,12 @@ class TsConnectionState {
     serverName: serverName ?? this.serverName,
     serverUid: serverUid ?? this.serverUid,
     voiceEncryptionMode: voiceEncryptionMode ?? this.voiceEncryptionMode,
+    welcomeMessage: welcomeMessage ?? this.welcomeMessage,
+    hostMessage: hostMessage ?? this.hostMessage,
+    hostMessageMode: hostMessageMode ?? this.hostMessageMode,
+    maxClients: maxClients ?? this.maxClients,
+    neededIdentitySecurityLevel:
+        neededIdentitySecurityLevel ?? this.neededIdentitySecurityLevel,
     nickname: nickname ?? this.nickname,
     ownClientId: ownClientId ?? this.ownClientId,
     channels: channels ?? this.channels,
@@ -349,6 +383,25 @@ class TsConnectionState {
   /// Whisper can only be armed once at least one target is selected.
   bool get hasWhisperTargets =>
       whisperTargetClientIds.isNotEmpty || whisperTargetChannelIds.isNotEmpty;
+
+  /// The channel the local user is currently in.
+  TsChannel? get currentChannel {
+    if (selectedChannelId == null) return null;
+    return channels.where((c) => c.id == selectedChannelId).firstOrNull;
+  }
+
+  /// Whether the local user may speak in the currently selected channel.
+  ///
+  /// Mirrors the desktop client: you need at least the channel's required talk
+  /// power (or an explicit server grant) to be heard. A channel with no talk
+  /// power requirement always allows speech.
+  bool get canTalkInCurrentChannel {
+    final channel = currentChannel;
+    if (channel == null || channel.neededTalkPower <= 0) return true;
+    final self = clients.where((c) => c.id == ownClientId).firstOrNull;
+    if (self == null) return false;
+    return self.talkPowerGranted || self.talkPower >= channel.neededTalkPower;
+  }
 }
 
 const _sentinel = Object();
@@ -796,6 +849,12 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
           serverUid: data['server_uid'] as String? ?? '',
           voiceEncryptionMode:
               data['voice_encryption_mode'] as String? ?? 'Unknown',
+          welcomeMessage: data['welcome_message'] as String? ?? '',
+          hostMessage: data['host_message'] as String? ?? '',
+          hostMessageMode: data['host_message_mode'] as int? ?? 0,
+          maxClients: data['max_clients'] as int? ?? 0,
+          neededIdentitySecurityLevel:
+              data['needed_identity_security_level'] as int? ?? 0,
           ownClientId: ownId,
           channels: channels,
           clients: clients,
@@ -805,6 +864,7 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
           reconnectAt: null,
         );
         _setSession(cid, st);
+        _maybeHydrateServerMessages(cid, st);
         if (st.serverName.isNotEmpty) {
           _setLabel(cid, st.serverName);
         }
@@ -1103,6 +1163,65 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
         }
         _setSession(cid, _stateOf(cid).copyWith(diagMessages: diag));
         break;
+    }
+  }
+
+  /// Surfaces the server's welcome message and host message (per its mode)
+  /// into the server conversation, the way the desktop client does.
+  ///
+  /// - Welcome: a plain system line in the server thread.
+  /// - Host message mode 1 (log): shown in the server thread.
+  /// - Mode 2 (modal) / 3 (modal + disconnect): surfaced as a prominent
+  ///   notice; mode 3 disconnects (the server asked us to leave).
+  void _maybeHydrateServerMessages(int cid, TsConnectionState st) {
+    final messages = [...st.messages];
+    final serverAppend = <ChatMessage>[];
+
+    void pushSystem(String text) {
+      serverAppend.add(
+        ChatMessage(
+          id: messages.length + serverAppend.length,
+          fromClient: '',
+          fromClientId: 0,
+          targetMode: 3,
+          message: text,
+          timestamp: DateTime.now(),
+          serverGenerated: true,
+          highlighted: true,
+        ),
+      );
+    }
+
+    if (st.welcomeMessage.isNotEmpty) {
+      pushSystem(st.welcomeMessage);
+    }
+
+    // Host message: only surface it if the server configured one and its mode
+    // tells us to show it (mode 0 = hide).
+    if (st.hostMessage.isNotEmpty && st.hostMessageMode == 1) {
+      pushSystem(st.hostMessage);
+    }
+
+    if (serverAppend.isNotEmpty) {
+      _setSession(cid, _stateOf(cid).copyWith(
+        messages: [...messages, ...serverAppend],
+      ));
+    }
+
+    if (st.hostMessage.isNotEmpty && st.hostMessageMode >= 2) {
+      // Mode 2 (modal) and 3 (modal + disconnect) are treated as a blocking
+      // server notice; mode 3 additionally means the server wants us gone.
+      final notice = st.hostMessageMode == 3
+          ? '${st.hostMessage}\n(The server requested this connection to close.)'
+          : st.hostMessage;
+      _setSession(
+        cid,
+        _stateOf(cid).copyWith(hostMessage: notice, error: notice),
+      );
+      if (st.hostMessageMode == 3) {
+        AppLog.i(_tag, 'host message mode 3, disconnecting');
+        disconnect(cid);
+      }
     }
   }
 

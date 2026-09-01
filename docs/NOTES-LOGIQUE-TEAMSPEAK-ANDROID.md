@@ -274,3 +274,30 @@ Résumé des ajouts de la phase 22 (voir `docs/PHASE-22-AUDIO-ROUTES-DUCK-STATUT
 > **Reste (futures phases)** : TSDNS multi-endpoints + `androidId` (H), refactor JNI direct PCM
 > 16 bits (I), recherche globale, gestionnaire de fichiers (ftlist/ftdelete), validation appareil
 > sur `voice.teamspeak.com`.
+
+---
+
+## 17. Phase 23 — métadonnées canaux, welcome/host message, droit de parole
+
+Résumé (voir `docs/PHASE-23-METADONNEES-CANAUX-WELCOME-HOST-TALKPOWER.md`).
+
+### (A) `TsChannel` enrichi (Rust + Dart) — **fait**
+- `needed_talk_power`, `max_clients` (−1 illimité, −2 hérité), `codec` (0..5), `codec_quality`,
+  `channel_type` (0=temp, 1=permanent, 2=semi-permanent), `is_default`, `is_private`,
+  `subscribed`, `icon_id`, `is_unencrypted`. Via `refresh_from_book` sur `book.channels`.
+
+### (B) `TsEvent::Connected` + variables serveur — **fait**
+- `welcome_message`, `host_message`, `host_message_mode` (0=none, 1=log, 2=modal,
+  3=modal+disconnect), `max_clients`, `needed_identity_security_level` depuis `book.server`.
+
+### (C) Affichage welcome/host — **fait**
+- `_maybeHydrateServerMessages(cid, st)` : welcome + host-mode-log → lignes système dans le fil
+  serveur ; host-mode 2/3 → notice ; mode 3 → déconnexion.
+
+### (D) Indicateurs & fiche canal — **fait**
+- Arbre : marqueurs défaut/permanent/semi-permanent/mot de passe/non-abonné/talk power.
+- Fiche canal : codec, max clients, talk power requis, type, badges booléens.
+
+### (E) Droit de parole — **fait**
+- `TsConnectionState.canTalkInCurrentChannel` : `talk_power_granted` OU
+  (`talk_power >= needed_talk_power`) sinon faux. Testé dans `test/channel_metadata_test.dart`.

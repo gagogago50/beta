@@ -1004,11 +1004,45 @@ class _SessionTabState extends ConsumerState<_SessionTab> {
           channel?.name ?? AppLocalizations.of(ctx).channelInfo,
           style: TextStyle(color: context.ts.textPrimary),
         ),
-        content: Text(
-          (channel?.topic.isNotEmpty ?? false)
-              ? (channel!.topic)
-              : AppLocalizations.of(ctx).noChannelInfo,
-          style: TextStyle(color: context.ts.textSecondary),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (channel != null) ...[
+                _infoRow(
+                  Icons.info_outline,
+                  channel.topic.isNotEmpty
+                      ? channel.topic
+                      : AppLocalizations.of(ctx).noChannelInfo,
+                ),
+                const SizedBox(height: 10),
+                _infoBadges(channel),
+                const SizedBox(height: 10),
+                _infoRow(
+                  Icons.record_voice_over,
+                  _codecLabel(channel.codec),
+                ),
+                _infoRow(
+                  Icons.group,
+                  _maxClientsLabel(channel),
+                ),
+                if (channel.neededTalkPower > 0)
+                  _infoRow(
+                    Icons.graphic_eq,
+                    'Talk power required: ${channel.neededTalkPower}',
+                  ),
+                _infoRow(
+                  Icons.payments,
+                  _persistenceLabel(channel),
+                ),
+              ] else
+                Text(
+                  AppLocalizations.of(ctx).noChannelInfo,
+                  style: TextStyle(color: context.ts.textSecondary),
+                ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -1021,6 +1055,81 @@ class _SessionTabState extends ConsumerState<_SessionTab> {
         ],
       ),
     );
+  }
+
+  /// A single key/value line of channel information.
+  Widget _infoRow(IconData icon, String value) => Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Icon(icon, size: 15, color: context.ts.textSecondary),
+      const SizedBox(width: 8),
+      Expanded(
+        child: Text(
+          value,
+          style: TextStyle(color: context.ts.textSecondary, fontSize: 13),
+        ),
+      ),
+    ],
+  );
+
+  /// Compact chips for the channel's boolean state (default, permanent,
+  /// semi-permanent, password, subscribed, private).
+  Widget _infoBadges(TsChannel channel) {
+    final labels = <String>[
+      if (channel.isDefault) 'Default',
+      if (channel.isPermanent) 'Permanent',
+      if (channel.isSemiPermanent) 'Semi-permanent',
+      if (channel.hasPassword) 'Password',
+      if (!channel.subscribed) 'Not subscribed',
+      if (channel.isPrivate) 'Private',
+    ];
+    if (labels.isEmpty) return const SizedBox.shrink();
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        for (final label in labels)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: context.ts.textSecondary.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              label,
+              style: TextStyle(
+                color: context.ts.textSecondary,
+                fontSize: 11,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// Human name for a TeamSpeak codec id.
+  String _codecLabel(int codec) => switch (codec) {
+    0 => 'Speex narrowband',
+    1 => 'Speex wideband',
+    2 => 'Speex ultrawideband',
+    3 => 'Celt (mono)',
+    4 => 'Opus voice',
+    5 => 'Opus music',
+    _ => 'Codec $codec',
+  };
+
+  /// Human label for a channel's client cap.
+  String _maxClientsLabel(TsChannel channel) {
+    if (channel.isUnlimitedClients) return 'Unlimited clients';
+    if (channel.maxClients == -2) return 'Inherited clients';
+    return 'Max ${channel.maxClients} clients';
+  }
+
+  /// Human label for a channel's persistence type.
+  String _persistenceLabel(TsChannel channel) {
+    if (channel.isPermanent) return 'Permanent channel';
+    if (channel.isSemiPermanent) return 'Semi-permanent channel';
+    return 'Temporary channel';
   }
 
   /// Saves the currently focused server into the bookmarks (if not present).

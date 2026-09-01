@@ -383,6 +383,55 @@ class _ChannelTreeState extends State<ChannelTree> {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              // At-a-glance channel markers, mirroring the desktop client's
+              // channel icons: default channel, permanence, password,
+              // subscription and talk-power requirement.
+              if (channel.isDefault)
+                Padding(
+                  padding: EdgeInsets.only(right: 3),
+                  child: Icon(Icons.home, size: 13, color: context.ts.accent),
+                ),
+              if (channel.isPermanent)
+                Padding(
+                  padding: EdgeInsets.only(right: 3),
+                  child: Icon(
+                    Icons.verified_user,
+                    size: 12,
+                    color: context.ts.textSecondary,
+                  ),
+                ),
+              if (channel.isSemiPermanent)
+                Padding(
+                  padding: EdgeInsets.only(right: 3),
+                  child: Icon(
+                    Icons.schedule,
+                    size: 12,
+                    color: context.ts.textSecondary,
+                  ),
+                ),
+              if (channel.hasPassword)
+                Padding(
+                  padding: EdgeInsets.only(right: 3),
+                  child: Icon(Icons.lock, size: 12, color: context.ts.warning),
+                ),
+              if (!channel.subscribed)
+                Padding(
+                  padding: EdgeInsets.only(right: 3),
+                  child: Icon(
+                    Icons.volume_off,
+                    size: 12,
+                    color: context.ts.warning,
+                  ),
+                ),
+              if (channel.neededTalkPower > 0)
+                Padding(
+                  padding: EdgeInsets.only(right: 3),
+                  child: Icon(
+                    Icons.graphic_eq,
+                    size: 12,
+                    color: context.ts.warning,
+                  ),
+                ),
               if (isFavorite)
                 Padding(
                   padding: EdgeInsets.only(right: 4),

@@ -120,6 +120,32 @@ fn hybrid_vad_should_transmit(state: &mut TsConnection, frame: &[f32]) -> bool {
     rms >= configured_gate || (rms >= adaptive_gate && speech_shape)
 }
 
+/// Maps a TeamSpeak `Codec` enum to the wire codec id used by the desktop
+/// client and its channel-info display. Values follow the official ordering
+/// (`channel_codec`): Speex narrowband=0 … Opus music=5.
+fn channel_codec_code(codec: &tsclientlib::Codec) -> u8 {
+    use tsclientlib::Codec;
+    match codec {
+        Codec::SpeexNarrowband => 0,
+        Codec::SpeexWideband => 1,
+        Codec::SpeexUltrawideband => 2,
+        Codec::CeltMono => 3,
+        Codec::OpusVoice => 4,
+        Codec::OpusMusic => 5,
+    }
+}
+
+/// Maps a TeamSpeak `ChannelType` to the persistence code used by the UI:
+/// 0 = temporary (deleted when empty), 1 = permanent, 2 = semi-permanent.
+fn channel_type_code(channel_type: &tsclientlib::ChannelType) -> u8 {
+    use tsclientlib::ChannelType;
+    match channel_type {
+        ChannelType::Permanent => 1,
+        ChannelType::SemiPermanent => 2,
+        ChannelType::Temporary => 0,
+    }
+}
+
 /// Build the roster snapshot from the server book.
 ///
 /// `now_connected`, `talking`, `whispering`, `permission_hints` come from the
@@ -152,6 +178,20 @@ fn refresh_from_book(
             has_password: c.has_password.unwrap_or(false),
             client_count: *count.get(&c.id.0).unwrap_or(&0),
             order: c.order.0 as u32,
+            needed_talk_power: c.needed_talk_power.unwrap_or(0),
+            max_clients: match c.max_clients.unwrap_or(tsclientlib::MaxClients::Unlimited) {
+                tsclientlib::MaxClients::Unlimited => -1,
+                tsclientlib::MaxClients::Inherited => -2,
+                tsclientlib::MaxClients::Limited(n) => n as i32,
+            },
+            codec: channel_codec_code(&c.codec),
+            codec_quality: c.codec_quality.unwrap_or(0),
+            channel_type: channel_type_code(&c.channel_type),
+            is_default: c.is_default.unwrap_or(false),
+            is_private: c.is_private.unwrap_or(false),
+            subscribed: c.subscribed,
+            icon_id: c.icon.unwrap_or(tsclientlib::IconId(0)).0,
+            is_unencrypted: c.is_unencrypted.unwrap_or(true),
         })
         .collect();
     let clients: Vec<_> = book
@@ -639,6 +679,26 @@ async fn do_connect(
     let server_uid = book.server.public_key.get_uid();
     let voice_encryption_mode = format!("{:?}", book.server.codec_encryption_mode);
     let oid = book.own_client.0 as u32;
+    // Server variables surfaced to the UI on connect: the welcome message is
+    // shown in the server tab, the host message honours the server's mode, and
+    // the capacity/identity-level let the status bar explain refusals.
+    let welcome_message = book.server.welcome_message.clone();
+    let host_message = book.server.hostmessage.clone();
+    // TeamSpeak's host-message modes: 0 = none, 1 = log (show in chat), 2 =
+    // modal, 3 = modal + disconnect.
+    let host_message_mode = match book.server.hostmessage_mode {
+        tsclientlib::HostMessageMode::None => 0u8,
+        tsclientlib::HostMessageMode::Log => 1u8,
+        tsclientlib::HostMessageMode::Modal => 2u8,
+        tsclientlib::HostMessageMode::Modalquit => 3u8,
+    };
+    let max_clients = book.server.max_clients as u32;
+    let needed_identity_security_level = book
+        .server
+        .optional_data
+        .as_ref()
+        .map(|d| d.needed_identity_security_level as u32)
+        .unwrap_or(0);
 
     log_info!(
         "do_connect: session {} OK, {} channels, {} clients, own_id={}",
@@ -671,6 +731,11 @@ async fn do_connect(
             client_id: oid,
             voice_encryption_mode,
             server_uid,
+            welcome_message,
+            host_message,
+            host_message_mode,
+            max_clients,
+            needed_identity_security_level,
         },
     );
     crate::notify_event_listener();
