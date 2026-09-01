@@ -38,10 +38,12 @@ void main() {
     });
 
     test('maps the channel-type codes to persistence flags', () {
-      expect(TsChannel(channelType: 0).isPermanent, isFalse);
-      expect(TsChannel(channelType: 0).isSemiPermanent, isFalse);
-      expect(TsChannel(channelType: 1).isPermanent, isTrue);
-      expect(TsChannel(channelType: 2).isSemiPermanent, isTrue);
+      TsChannel ofType(int channelType) =>
+          TsChannel(id: 1, name: 'A', parentId: 0, channelType: channelType);
+      expect(ofType(0).isPermanent, isFalse);
+      expect(ofType(0).isSemiPermanent, isFalse);
+      expect(ofType(1).isPermanent, isTrue);
+      expect(ofType(2).isSemiPermanent, isTrue);
     });
   });
 

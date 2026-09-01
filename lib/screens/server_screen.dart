@@ -431,8 +431,9 @@ class _SessionTabState extends ConsumerState<_SessionTab> {
           obscureText: true,
           style: TextStyle(color: context.ts.textPrimary),
           decoration: InputDecoration(
-            hintText: AppLocalizations.of(dialogContext)
-                .channelPasswordOptional,
+            hintText: AppLocalizations.of(
+              dialogContext,
+            ).channelPasswordOptional,
           ),
           onSubmitted: (value) => Navigator.pop(dialogContext, value),
         ),
