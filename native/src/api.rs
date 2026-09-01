@@ -1506,9 +1506,7 @@ fn handle_control_item(conn_id: crate::ConnectionId, item: StreamItem, con: &mut
                             let key = (channel_id, path.clone());
                             let request_id = SESSIONS
                                 .get(&conn_id)
-                                .and_then(|s| {
-                                    s.pending_file_requests.lock().remove(&key)
-                                })
+                                .and_then(|s| s.pending_file_requests.lock().remove(&key))
                                 .unwrap_or(0);
                             let files = crate::session(conn_id)
                                 .and_then(|state| {
@@ -2032,8 +2030,7 @@ async fn event_loop(
                         channel_password: Cow::Owned(channel_password),
                         name: Cow::Owned(path),
                     };
-                    let _ =
-                        OutDeleteFileMessage::new(&mut std::iter::once(part)).send(&mut con);
+                    let _ = OutDeleteFileMessage::new(&mut std::iter::once(part)).send(&mut con);
                 }
                 Command::CreateDirectory {
                     channel_id,
@@ -2045,8 +2042,8 @@ async fn event_loop(
                         channel_password: Cow::Owned(channel_password),
                         directory_name: Cow::Owned(path),
                     };
-                    let _ = OutCreateDirectoryMessage::new(&mut std::iter::once(part))
-                        .send(&mut con);
+                    let _ =
+                        OutCreateDirectoryMessage::new(&mut std::iter::once(part)).send(&mut con);
                 }
                 Command::CreateChannel {
                     parent_id,
@@ -3153,7 +3150,9 @@ pub extern "C" fn ts_list_files(
     ) == 0
     {
         if let Some(s) = SESSIONS.get(&conn_id) {
-            s.pending_file_requests.lock().remove(&(channel_id, path_key));
+            s.pending_file_requests
+                .lock()
+                .remove(&(channel_id, path_key));
         }
         return 0;
     }
