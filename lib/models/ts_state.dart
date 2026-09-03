@@ -96,6 +96,10 @@ class TsConnectionState {
 
   /// Metadata of the last `ftgetfileinfo` reply, if any.
   final ServerFileInfo? serverFileInfo;
+
+  /// Human confirmation of the last successfully used permission key, set by
+  /// the `token_used` event and cleared once the UI has shown it.
+  final String? tokenConfirmation;
   final bool voiceActive;
   final bool inputMuted;
   final bool outputMuted;
@@ -208,6 +212,7 @@ class TsConnectionState {
     this.serverFilesLoading = false,
     this.serverFilesError,
     this.serverFileInfo,
+    this.tokenConfirmation,
     this.voiceActive = false,
     this.inputMuted = false,
     this.outputMuted = false,
@@ -279,6 +284,7 @@ class TsConnectionState {
     bool? serverFilesLoading,
     Object? serverFilesError = _sentinel,
     Object? serverFileInfo = _sentinel,
+    Object? tokenConfirmation = _sentinel,
     bool? voiceActive,
     bool? inputMuted,
     bool? outputMuted,
@@ -357,6 +363,9 @@ class TsConnectionState {
     serverFileInfo: serverFileInfo == _sentinel
         ? this.serverFileInfo
         : serverFileInfo as ServerFileInfo?,
+    tokenConfirmation: tokenConfirmation == _sentinel
+        ? this.tokenConfirmation
+        : tokenConfirmation as String?,
     voiceActive: voiceActive ?? this.voiceActive,
     inputMuted: inputMuted ?? this.inputMuted,
     outputMuted: outputMuted ?? this.outputMuted,
@@ -1005,6 +1014,14 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
             ),
           ),
         );
+        break;
+
+      case 'token_used':
+        final token2 = data['token2'] as String? ?? '';
+        final granted = token2.isNotEmpty
+            ? 'Permission key accepted (granted $token2)'
+            : 'Permission key accepted';
+        _setSession(cid, _stateOf(cid).copyWith(tokenConfirmation: granted));
         break;
 
       case 'command_throttled':
@@ -2679,6 +2696,20 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
     TsNative.fileInfo(connectionId: cid, channelId: channelId, name: name);
   }
 
+  /// Uses a privilege key (permission token) on this server. The `token_used`
+  /// event confirms acceptance.
+  void useToken(int cid, String token) {
+    if (!_stateOf(cid).connected || token.trim().isEmpty) return;
+    TsNative.useToken(cid, token.trim());
+  }
+
+  /// Clears the transient token confirmation once the UI has shown it.
+  void clearTokenConfirmation(int cid) {
+    final st = _stateOf(cid);
+    if (st.tokenConfirmation == null) return;
+    _setSession(cid, st.copyWith(tokenConfirmation: null));
+  }
+
   /// Cancels an in-flight transfer (best effort: only a transfer that has not
   /// begun streaming is actually cancelled).
   bool cancelTransfer(int cid, int transferId) {
@@ -2960,6 +2991,9 @@ class TsConnectionNotifier {
     targetChannelId: targetChannelId,
   );
   void fileInfo(String name) => _controller.fileInfo(connectionId, name);
+  void useToken(String token) => _controller.useToken(connectionId, token);
+  void clearTokenConfirmation() =>
+      _controller.clearTokenConfirmation(connectionId);
   void createChannel({
     required int parentId,
     required String name,

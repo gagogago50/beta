@@ -128,6 +128,10 @@ pub enum Command {
         channel_password: String,
         name: String,
     },
+    /// Uses a privilege key (permission token) on this server (`privilegekeyuse`).
+    UseToken {
+        token: String,
+    },
     /// Creates a channel in [parent_id] (0 = the root). The server enforces
     /// the `b_channel_create_*` permission.
     CreateChannel {
@@ -212,6 +216,8 @@ impl Command {
             | Command::CreateDirectory { .. }
             | Command::RenameFile { .. }
             | Command::FileInfoRequest { .. } => 1.0,
+            // Using a permission key is a rare, audited action.
+            Command::UseToken { .. } => 1.0,
             // Channel administration is audited and permission-gated; price it
             // like a text message so a stuck UI cannot create a flood of
             // channels.
@@ -653,6 +659,18 @@ pub enum TsEvent {
         size: u64,
         modified: u64,
         ok: bool,
+    },
+    /// Confirmation that a permission key (privilege token) was used; the
+    /// server replies with `notifytokenused`.
+    #[serde(rename = "token_used")]
+    TokenUsed {
+        token: String,
+        // Human context the server echoes back (e.g. the granted group).
+        token1: String,
+        /// Display name of the granted server/channel group.
+        token2: String,
+        /// Same token repeated; useful to identify which one succeeded.
+        client_db_id: u64,
     },
     /// Outgoing commands are being paced to stay under the server's flood
     /// threshold. `pending` is the current backlog.

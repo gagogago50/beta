@@ -272,6 +272,10 @@ typedef _FileInfoNative =
     Uint32 Function(Uint64, Uint64, Pointer<Utf8>, Pointer<Utf8>);
 typedef _FileInfoDart = int Function(int, int, Pointer<Utf8>, Pointer<Utf8>);
 
+// ts_use_token(connection_id, token) -> bool
+typedef _UseTokenNative = Uint8 Function(Uint64, Pointer<Utf8>);
+typedef _UseTokenDart = int Function(int, Pointer<Utf8>);
+
 // ts_create_channel(connection_id, parent_id, name, topic, description,
 //                   password, max_clients, permanent, semi_permanent) -> bool
 typedef _CreateChannelNative =
@@ -494,6 +498,9 @@ final _renameFile = _lib.lookupFunction<_RenameFileNative, _RenameFileDart>(
 );
 final _fileInfo = _lib.lookupFunction<_FileInfoNative, _FileInfoDart>(
   'ts_file_info',
+);
+final _useToken = _lib.lookupFunction<_UseTokenNative, _UseTokenDart>(
+  'ts_use_token',
 );
 final _createChannel = _lib
     .lookupFunction<_CreateChannelNative, _CreateChannelDart>(
@@ -1080,6 +1087,18 @@ class TsNative {
     } finally {
       _freeInputString(namePtr);
       _freeInputString(passwordPtr);
+    }
+  }
+
+  /// Uses a privilege key (permission token) on this server
+  /// (`privilegekeyuse`). The server confirms with a `token_used` event.
+  static bool useToken(int connectionId, String token) {
+    debugLog('useToken(len=${token.length})');
+    final ptr = _strToPtr(token);
+    try {
+      return _useToken(connectionId, ptr) != 0;
+    } finally {
+      _freeInputString(ptr);
     }
   }
 

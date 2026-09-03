@@ -1548,6 +1548,23 @@ fn handle_control_item(conn_id: crate::ConnectionId, item: StreamItem, con: &mut
                             );
                         }
                     }
+                    InMessage::TokenUsed(used) => {
+                        // A permission key was accepted. `token1`/`token2` are
+                        // the numeric group/channel ids the server echoed, and
+                        // `client_db_id` identifies the client the grant applies
+                        // to — enough for the UI to confirm the action.
+                        for item in used.iter() {
+                            push_event(
+                                conn_id,
+                                TsEvent::TokenUsed {
+                                    token: item.token.clone(),
+                                    token1: item.token1.clone(),
+                                    token2: item.token2.clone(),
+                                    client_db_id: item.client_db_id.0,
+                                },
+                            );
+                        }
+                    }
                     InMessage::CommandError(errors) => {
                         for error in errors.iter() {
                             if error.id == tsclientlib::TsError::Ok {
@@ -2108,6 +2125,21 @@ async fn event_loop(
                                 size: 0,
                                 modified: 0,
                                 ok: false,
+                            },
+                        );
+                    }
+                }
+                Command::UseToken { token } => {
+                    let part = OutPrivilegeKeyUsePart {
+                        token: Cow::Owned(token),
+                    };
+                    if let Err(_error) =
+                        OutPrivilegeKeyUseMessage::new(&mut std::iter::once(part)).send(&mut con)
+                    {
+                        push_event(
+                            conn_id,
+                            TsEvent::Error {
+                                message: "Failed to use permission key".into(),
                             },
                         );
                     }
@@ -3424,6 +3456,26 @@ pub extern "C" fn ts_file_info(
         return 0;
     }
     request_id
+}
+
+/// Uses a privilege key (permission token) on this server (`privilegekeyuse`).
+/// The server confirms with a `token_used` (notifytokenused) event.
+#[no_mangle]
+pub extern "C" fn ts_use_token(conn_id: crate::ConnectionId, token: *const c_char) -> u8 {
+    let connected = crate::session(conn_id)
+        .map(|state| state.lock().connected)
+        .unwrap_or(false);
+    if token.is_null() || !connected {
+        return 0;
+    }
+    let token = unsafe { std::ffi::CStr::from_ptr(token) }
+        .to_string_lossy()
+        .trim()
+        .to_string();
+    if token.is_empty() {
+        return 0;
+    }
+    queue_command(conn_id, Command::UseToken { token })
 }
 
 // ─── Channel administration (permission-gated) ──────────────────────

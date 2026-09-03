@@ -376,3 +376,26 @@ Résumé (voir `docs/PHASE-26-RENOMMER-INFO-FICHIERS.md`).
 
 > **Reste** : TSDNS multi-endpoints + `androidId` (couvert en partie par tsclientlib),
 > refactor JNI direct PCM 16 bits (D4), validation appareil.
+
+## 21. Phase 27 — utiliser une permission key (`privilegekeyuse`/`tokenuse`)
+
+Résumé (voir `docs/PHASE-27-PRIVILEGE-KEY.md`).
+
+### Protocole
+`PrivilegeKeyUse` (`privilegekeyuse` token) → `TokenUsed` (`notifytokenused`
+token tokencustomset token1 token2 clid cldbid cluid).
+
+### Mapping champs
+`token(Cow<str>)`, `token1`, `token2`, `client_db_id: ClientDbId`.
+`OutPrivilegeKeyUsePart { token }`.
+
+### Rust
+- `TsEvent::TokenUsed` + commande `UseToken` + FFI `ts_use_token` + handler
+  `InMessage::TokenUsed`.
+
+### Dart
+- `TsNative.useToken`, `tokenConfirmation`/`useToken`/`clearTokenConfirmation`,
+  handler `token_used`, entrée « Enter permission key » + SnackBar.
+
+> **Reste** : TSDNS multi-endpoints + `androidId` (couvert en partie par tsclientlib),
+> refactor JNI direct PCM 16 bits (D4), validation appareil.

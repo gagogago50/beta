@@ -273,6 +273,17 @@ class _SessionTabState extends ConsumerState<_SessionTab> {
         .read(tsMultiServerProvider.notifier)
         .controllerFor(cid);
 
+    // Show a confirmation when a privilege key was accepted, then clear it.
+    ref.listen<String?>(
+      tsSessionProvider(cid).select((s) => s.state.tokenConfirmation),
+      (prev, next) {
+        if (next == null || next == prev) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(next)));
+        notifier.clearTokenConfirmation();
+      },
+    );
     // Present a failure / retry in-tab instead of popping the whole screen.
     if ((conn.connecting || conn.phase.isBusy) && !conn.connected) {
       return Padding(
@@ -995,6 +1006,21 @@ class _SessionTabState extends ConsumerState<_SessionTab> {
               },
             ),
             ListTile(
+              leading: Icon(Icons.vpn_key, color: context.ts.accent),
+              title: Text(
+                'Enter permission key',
+                style: TextStyle(color: context.ts.textPrimary, fontSize: 14),
+              ),
+              subtitle: Text(
+                'Use a privilege key granted by an admin',
+                style: TextStyle(color: context.ts.textSecondary, fontSize: 12),
+              ),
+              onTap: () {
+                Navigator.pop(ctx);
+                _promptPrivilegeKey(conn, notifier);
+              },
+            ),
+            ListTile(
               leading: Icon(Icons.network_check, color: context.ts.accent),
               title: Text(
                 al.networkStats,
@@ -1063,6 +1089,43 @@ class _SessionTabState extends ConsumerState<_SessionTab> {
       ),
       builder: (ctx) => _GlobalSearchSheet(connectionId: widget.connectionId),
     );
+  }
+
+  /// Prompts for a privilege key (permission token) and sends it to the server.
+  /// The `token_used` event shows a confirmation in a snack bar.
+  Future<void> _promptPrivilegeKey(
+    TsConnectionState conn,
+    TsConnectionNotifier notifier,
+  ) async {
+    final controller = TextEditingController();
+    final token = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.ts.card,
+        title: const Text('Enter permission key'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: TextStyle(color: context.ts.textPrimary),
+          decoration: const InputDecoration(
+            hintText: 'Paste the key an admin gave you',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Use'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (token == null || token.isEmpty) return;
+    notifier.useToken(token);
   }
 
   /// Displays the currently selected channel's topic / description.
