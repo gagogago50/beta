@@ -110,6 +110,24 @@ pub enum Command {
         channel_password: String,
         path: String,
     },
+    /// Renames a file in a channel (`ftrenamefile`), optionally moving it to
+    /// another channel (`target_channel_id`).
+    RenameFile {
+        channel_id: u64,
+        channel_password: String,
+        target_channel_id: Option<u64>,
+        target_channel_password: Option<String>,
+        old_name: String,
+        new_name: String,
+    },
+    /// Requests the metadata of a file (`ftgetfileinfo`). The engine answers
+    /// with a `ServerFileInfo` event when the server reports it.
+    FileInfoRequest {
+        request_id: u32,
+        channel_id: u64,
+        channel_password: String,
+        name: String,
+    },
     /// Creates a channel in [parent_id] (0 = the root). The server enforces
     /// the `b_channel_create_*` permission.
     CreateChannel {
@@ -191,7 +209,9 @@ impl Command {
             // cannot flood the server.
             Command::RequestFileList { .. }
             | Command::DeleteFile { .. }
-            | Command::CreateDirectory { .. } => 1.0,
+            | Command::CreateDirectory { .. }
+            | Command::RenameFile { .. }
+            | Command::FileInfoRequest { .. } => 1.0,
             // Channel administration is audited and permission-gated; price it
             // like a text message so a stuck UI cannot create a flood of
             // channels.
@@ -217,6 +237,10 @@ impl Command {
                 | (
                     Command::RequestFileList { .. },
                     Command::RequestFileList { .. }
+                )
+                | (
+                    Command::FileInfoRequest { .. },
+                    Command::FileInfoRequest { .. }
                 )
                 | (
                     Command::SetChannelCommander { .. },
@@ -381,6 +405,9 @@ pub struct Session {
     /// engine can correlate the multi-part `FileList`/`FileListFinished` answer
     /// back to the `request_id` handed to Dart.
     pub pending_file_requests: Mutex<HashMap<(u64, String), u32>>,
+    /// In-flight `ftgetfileinfo` requests, keyed by `(channel_id, name)` so the
+    /// engine can correlate the `FileInfo` answer back to the `request_id`.
+    pub pending_file_info_requests: Mutex<HashMap<(u64, String), u32>>,
     pub next_transfer_id: AtomicU32,
     /// Monotonic source of file-list request ids.
     pub next_request_id: AtomicU32,
@@ -409,6 +436,7 @@ impl Session {
             pending_transfers: Mutex::new(HashMap::new()),
             upload_jobs: Mutex::new(HashMap::new()),
             pending_file_requests: Mutex::new(HashMap::new()),
+            pending_file_info_requests: Mutex::new(HashMap::new()),
             next_transfer_id: AtomicU32::new(1),
             next_request_id: AtomicU32::new(1),
             server_host: Mutex::new(String::new()),
@@ -613,6 +641,18 @@ pub enum TsEvent {
         ok: bool,
         error: Option<String>,
         files: Vec<TsServerFile>,
+    },
+    /// Result of a `ftgetfileinfo` request (a `notifyfileinfo` reply). Emitted
+    /// once per file information the server reports.
+    #[serde(rename = "file_info")]
+    ServerFileInfo {
+        request_id: u32,
+        channel_id: u32,
+        path: String,
+        name: String,
+        size: u64,
+        modified: u64,
+        ok: bool,
     },
     /// Outgoing commands are being paced to stay under the server's flood
     /// threshold. `pending` is the current backlog.

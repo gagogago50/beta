@@ -1523,6 +1523,31 @@ fn handle_control_item(conn_id: crate::ConnectionId, item: StreamItem, con: &mut
                             );
                         }
                     }
+                    InMessage::FileInfo(infos) => {
+                        // A single `notifyfileinfo` reply carries the metadata
+                        // of one file. Emit it paired with the request id that
+                        // triggered it (recovered from the pending map).
+                        for item in infos.iter() {
+                            let channel_id = item.channel_id.0;
+                            let key = (channel_id, item.name.clone());
+                            let request_id = SESSIONS
+                                .get(&conn_id)
+                                .and_then(|s| s.pending_file_info_requests.lock().remove(&key))
+                                .unwrap_or(0);
+                            push_event(
+                                conn_id,
+                                TsEvent::ServerFileInfo {
+                                    request_id,
+                                    channel_id: channel_id as u32,
+                                    path: item.path.clone(),
+                                    name: item.name.clone(),
+                                    size: item.size,
+                                    modified: item.date_time.unix_timestamp().max(0) as u64,
+                                    ok: true,
+                                },
+                            );
+                        }
+                    }
                     InMessage::CommandError(errors) => {
                         for error in errors.iter() {
                             if error.id == tsclientlib::TsError::Ok {
@@ -2040,6 +2065,52 @@ async fn event_loop(
                     };
                     let _ =
                         OutCreateDirectoryMessage::new(&mut std::iter::once(part)).send(&mut con);
+                }
+                Command::RenameFile {
+                    channel_id,
+                    channel_password,
+                    target_channel_id,
+                    target_channel_password,
+                    old_name,
+                    new_name,
+                } => {
+                    let part = OutRenameFilePart {
+                        channel_id: ChannelId(channel_id),
+                        channel_password: Cow::Owned(channel_password),
+                        target_channel_id: target_channel_id.map(ChannelId),
+                        target_channel_password: target_channel_password.map(Cow::Owned),
+                        old_name: Cow::Owned(old_name),
+                        new_name: Cow::Owned(new_name),
+                    };
+                    let _ = OutRenameFileMessage::new(&mut std::iter::once(part)).send(&mut con);
+                }
+                Command::FileInfoRequest {
+                    request_id,
+                    channel_id,
+                    channel_password,
+                    name,
+                } => {
+                    let part = OutFileInfoRequestPart {
+                        channel_id: ChannelId(channel_id),
+                        channel_password: Cow::Owned(channel_password),
+                        name: Cow::Owned(name),
+                    };
+                    if let Err(_error) =
+                        OutFileInfoRequestMessage::new(&mut std::iter::once(part)).send(&mut con)
+                    {
+                        push_event(
+                            conn_id,
+                            TsEvent::ServerFileInfo {
+                                request_id,
+                                channel_id: channel_id as u32,
+                                path: String::new(),
+                                name: String::new(),
+                                size: 0,
+                                modified: 0,
+                                ok: false,
+                            },
+                        );
+                    }
                 }
                 Command::CreateChannel {
                     parent_id,
@@ -3231,6 +3302,128 @@ pub extern "C" fn ts_create_directory(
             path,
         },
     )
+}
+
+/// Renames a file in a channel (`ftrenamefile`), optionally moving it to
+/// [target_channel_id] (with its own [target_channel_password]).
+#[no_mangle]
+pub extern "C" fn ts_rename_file(
+    conn_id: crate::ConnectionId,
+    channel_id: u64,
+    old_name: *const c_char,
+    new_name: *const c_char,
+    channel_password: *const c_char,
+    target_channel_id: u64,
+    target_channel_password: *const c_char,
+) -> u8 {
+    let connected = crate::session(conn_id)
+        .map(|state| state.lock().connected)
+        .unwrap_or(false);
+    if old_name.is_null() || new_name.is_null() || !connected {
+        return 0;
+    }
+    let old_name = unsafe { std::ffi::CStr::from_ptr(old_name) }
+        .to_string_lossy()
+        .trim()
+        .to_string();
+    let new_name = unsafe { std::ffi::CStr::from_ptr(new_name) }
+        .to_string_lossy()
+        .trim()
+        .to_string();
+    if old_name.is_empty() || new_name.is_empty() {
+        return 0;
+    }
+    let password = if channel_password.is_null() {
+        String::new()
+    } else {
+        unsafe { std::ffi::CStr::from_ptr(channel_password) }
+            .to_string_lossy()
+            .into_owned()
+    };
+    let target_password = if target_channel_password.is_null() {
+        None
+    } else {
+        let value = unsafe { std::ffi::CStr::from_ptr(target_channel_password) }
+            .to_string_lossy()
+            .into_owned();
+        (!value.is_empty()).then_some(value)
+    };
+    queue_command(
+        conn_id,
+        Command::RenameFile {
+            channel_id,
+            channel_password: password,
+            target_channel_id: (target_channel_id > 0).then_some(target_channel_id),
+            target_channel_password: target_password,
+            old_name,
+            new_name,
+        },
+    )
+}
+
+/// Requests the metadata of a file (`ftgetfileinfo`). Returns the `request_id`
+/// that the asynchronous `file_info` event carries back, or 0 on rejection.
+#[no_mangle]
+pub extern "C" fn ts_file_info(
+    conn_id: crate::ConnectionId,
+    channel_id: u64,
+    name: *const c_char,
+    channel_password: *const c_char,
+) -> u32 {
+    let connected = crate::session(conn_id)
+        .map(|state| state.lock().connected)
+        .unwrap_or(false);
+    if name.is_null() || !connected {
+        return 0;
+    }
+    let name = unsafe { std::ffi::CStr::from_ptr(name) }
+        .to_string_lossy()
+        .trim()
+        .to_string();
+    if name.is_empty() {
+        return 0;
+    }
+    let password = if channel_password.is_null() {
+        String::new()
+    } else {
+        unsafe { std::ffi::CStr::from_ptr(channel_password) }
+            .to_string_lossy()
+            .into_owned()
+    };
+
+    let Some(session) = SESSIONS.get(&conn_id) else {
+        return 0;
+    };
+    let request_id = session.next_request_id.fetch_add(1, Ordering::Relaxed);
+    let request_id = if request_id == 0 {
+        session.next_request_id.fetch_add(1, Ordering::Relaxed)
+    } else {
+        request_id
+    };
+    // Correlate the upcoming `notifyfileinfo` back to this request id.
+    session
+        .pending_file_info_requests
+        .lock()
+        .insert((channel_id, name.clone()), request_id);
+
+    if queue_command(
+        conn_id,
+        Command::FileInfoRequest {
+            request_id,
+            channel_id,
+            channel_password: password,
+            name: name.clone(),
+        },
+    ) == 0
+    {
+        if let Some(s) = SESSIONS.get(&conn_id) {
+            s.pending_file_info_requests
+                .lock()
+                .remove(&(channel_id, name));
+        }
+        return 0;
+    }
+    request_id
 }
 
 // ─── Channel administration (permission-gated) ──────────────────────

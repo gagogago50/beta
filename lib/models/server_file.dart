@@ -33,3 +33,26 @@ class ServerFile {
     return '${(size / (1024 * 1024 * 1024)).toStringAsFixed(1)} GiB';
   }
 }
+
+/// Metadata of a single server file, as reported by the engine's `file_info`
+/// event (a `ftgetfileinfo` reply).
+class ServerFileInfo {
+  final String path;
+  final String name;
+  final int size;
+  final int modified;
+
+  const ServerFileInfo({
+    required this.path,
+    required this.name,
+    this.size = 0,
+    this.modified = 0,
+  });
+
+  factory ServerFileInfo.fromJson(Map<String, dynamic> json) => ServerFileInfo(
+    path: json['path'] as String? ?? '',
+    name: json['name'] as String? ?? '',
+    size: (json['size'] as num?)?.toInt() ?? 0,
+    modified: (json['modified'] as num?)?.toInt() ?? 0,
+  );
+}

@@ -2407,6 +2407,41 @@ class _FileBrowserSheet extends ConsumerWidget {
     if (ok == true) notifier.deleteServerFile(path);
   }
 
+  Future<void> _promptRename(
+    BuildContext context,
+    TsConnectionNotifier notifier,
+    TsConnectionState conn,
+    ServerFile file,
+  ) async {
+    final controller = TextEditingController(text: file.name);
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.ts.card,
+        title: const Text('Rename file'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: TextStyle(color: context.ts.textPrimary),
+          decoration: const InputDecoration(hintText: 'New name'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Rename'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (newName == null || newName.isEmpty || newName == file.name) return;
+    notifier.renameServerFile(oldName: file.name, newName: newName);
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final session = ref.watch(tsSessionProvider(connectionId));
@@ -2537,6 +2572,20 @@ class _FileBrowserSheet extends ConsumerWidget {
                                   onPressed: () =>
                                       _download(context, notifier, conn, file),
                                 ),
+                              IconButton(
+                                icon: Icon(
+                                  Icons.edit,
+                                  color: context.ts.textSecondary,
+                                  size: 18,
+                                ),
+                                tooltip: 'Rename',
+                                onPressed: () => _promptRename(
+                                  context,
+                                  notifier,
+                                  conn,
+                                  file,
+                                ),
+                              ),
                               IconButton(
                                 icon: Icon(
                                   Icons.delete_outline,

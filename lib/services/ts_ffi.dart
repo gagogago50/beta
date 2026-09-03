@@ -244,6 +244,34 @@ typedef _CreateDirNative =
     Uint8 Function(Uint64, Uint64, Pointer<Utf8>, Pointer<Utf8>);
 typedef _CreateDirDart = int Function(int, int, Pointer<Utf8>, Pointer<Utf8>);
 
+// ts_rename_file(connection_id, channel_id, old_name, new_name, channel_password,
+//                target_channel_id, target_channel_password) -> bool
+typedef _RenameFileNative =
+    Uint8 Function(
+      Uint64,
+      Uint64,
+      Pointer<Utf8>,
+      Pointer<Utf8>,
+      Pointer<Utf8>,
+      Uint64,
+      Pointer<Utf8>,
+    );
+typedef _RenameFileDart =
+    int Function(
+      int,
+      int,
+      Pointer<Utf8>,
+      Pointer<Utf8>,
+      Pointer<Utf8>,
+      int,
+      Pointer<Utf8>,
+    );
+
+// ts_file_info(connection_id, channel_id, name, channel_password) -> u32
+typedef _FileInfoNative =
+    Uint32 Function(Uint64, Uint64, Pointer<Utf8>, Pointer<Utf8>);
+typedef _FileInfoDart = int Function(int, int, Pointer<Utf8>, Pointer<Utf8>);
+
 // ts_create_channel(connection_id, parent_id, name, topic, description,
 //                   password, max_clients, permanent, semi_permanent) -> bool
 typedef _CreateChannelNative =
@@ -460,6 +488,12 @@ final _deleteFile = _lib.lookupFunction<_DeleteFileNative, _DeleteFileDart>(
 );
 final _createDir = _lib.lookupFunction<_CreateDirNative, _CreateDirDart>(
   'ts_create_directory',
+);
+final _renameFile = _lib.lookupFunction<_RenameFileNative, _RenameFileDart>(
+  'ts_rename_file',
+);
+final _fileInfo = _lib.lookupFunction<_FileInfoNative, _FileInfoDart>(
+  'ts_file_info',
 );
 final _createChannel = _lib
     .lookupFunction<_CreateChannelNative, _CreateChannelDart>(
@@ -992,6 +1026,59 @@ class TsNative {
       return _createDir(connectionId, channelId, pathPtr, passwordPtr) != 0;
     } finally {
       _freeInputString(pathPtr);
+      _freeInputString(passwordPtr);
+    }
+  }
+
+  /// Renames a file in a channel (`ftrenamefile`), optionally moving it to
+  /// [targetChannelId] (with [targetChannelPassword]).
+  static bool renameFile({
+    required int connectionId,
+    required int channelId,
+    required String oldName,
+    required String newName,
+    String? channelPassword,
+    int? targetChannelId,
+    String? targetChannelPassword,
+  }) {
+    final oldPtr = _strToPtr(oldName);
+    final newPtr = _strToPtr(newName);
+    final passwordPtr = _strToPtr(channelPassword);
+    final targetPasswordPtr = _strToPtr(targetChannelPassword);
+    try {
+      return _renameFile(
+            connectionId,
+            channelId,
+            oldPtr,
+            newPtr,
+            passwordPtr,
+            targetChannelId ?? 0,
+            targetPasswordPtr,
+          ) !=
+          0;
+    } finally {
+      _freeInputString(oldPtr);
+      _freeInputString(newPtr);
+      _freeInputString(passwordPtr);
+      _freeInputString(targetPasswordPtr);
+    }
+  }
+
+  /// Requests the metadata of a file (`ftgetfileinfo`). Returns the
+  /// `request_id` that the asynchronous `file_info` event carries back, or 0
+  /// when the request was rejected locally.
+  static int fileInfo({
+    required int connectionId,
+    required int channelId,
+    required String name,
+    String? channelPassword,
+  }) {
+    final namePtr = _strToPtr(name);
+    final passwordPtr = _strToPtr(channelPassword);
+    try {
+      return _fileInfo(connectionId, channelId, namePtr, passwordPtr);
+    } finally {
+      _freeInputString(namePtr);
       _freeInputString(passwordPtr);
     }
   }

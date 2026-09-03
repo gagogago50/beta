@@ -349,3 +349,30 @@ Résumé (voir `docs/PHASE-25-RECHERCHE-GLOBALE.md`). Purement côté Dart, aucu
 
 > **Reste** : TSDNS multi-endpoints + `androidId`, refactor JNI direct PCM 16 bits (D4),
 > `ftgetfileinfo`/`ftrenamefile`, validation appareil.
+
+## 20. Phase 26 — renommer un fichier (`ftrenamefile`) + info (`ftgetfileinfo`)
+
+Résumé (voir `docs/PHASE-26-RENOMMER-INFO-FICHIERS.md`).
+
+### Protocole
+`FileInfoRequest` (`ftgetfileinfo` cid cpw name) → `FileInfo` (name size datetime).
+`RenameFile` (`ftrenamefile` cid cpw oldname newname [tcid tcpw]) — déplacement optionnel.
+
+### Mapping champs
+`name`, `size(u64)`, `datetime→date_time(OffsetDateTime)`, `oldname→old_name`,
+`newname→new_name`, `tcid→target_channel_id: Option<ChannelId>`, `tcpw→target_channel_password`.
+
+### Rust
+- `TsEvent::ServerFileInfo` + commandes `RenameFile`/`FileInfoRequest` +
+  `Session.pending_file_info_requests` + FFI `ts_rename_file`/`ts_file_info` +
+  handler `InMessage::FileInfo`.
+
+### Dart
+- `ServerFileInfo`, `TsNative.renameFile`/`fileInfo`, actions `renameServerFile`/`fileInfo`,
+  handler `file_info`, bouton « Rename » dans `_FileBrowserSheet`.
+
+### Tests
+- `ServerFileInfo` (parsing + défauts).
+
+> **Reste** : TSDNS multi-endpoints + `androidId` (couvert en partie par tsclientlib),
+> refactor JNI direct PCM 16 bits (D4), validation appareil.

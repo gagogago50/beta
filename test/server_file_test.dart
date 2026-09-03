@@ -31,4 +31,26 @@ void main() {
       );
     });
   });
+
+  group('ServerFileInfo', () {
+    test('parses the engine JSON fields', () {
+      final info = ServerFileInfo.fromJson({
+        'path': '/docs',
+        'name': 'readme.txt',
+        'size': 4096,
+        'modified': 1700000000,
+      });
+      expect(info.path, '/docs');
+      expect(info.name, 'readme.txt');
+      expect(info.size, 4096);
+      expect(info.modified, 1700000000);
+    });
+
+    test('defaults to empty/zero for missing fields', () {
+      final info = ServerFileInfo.fromJson(const {});
+      expect(info.name, '');
+      expect(info.size, 0);
+      expect(info.modified, 0);
+    });
+  });
 }

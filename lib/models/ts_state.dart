@@ -93,6 +93,9 @@ class TsConnectionState {
   final String serverFilePath;
   final bool serverFilesLoading;
   final String? serverFilesError;
+
+  /// Metadata of the last `ftgetfileinfo` reply, if any.
+  final ServerFileInfo? serverFileInfo;
   final bool voiceActive;
   final bool inputMuted;
   final bool outputMuted;
@@ -204,6 +207,7 @@ class TsConnectionState {
     this.serverFilePath = '/',
     this.serverFilesLoading = false,
     this.serverFilesError,
+    this.serverFileInfo,
     this.voiceActive = false,
     this.inputMuted = false,
     this.outputMuted = false,
@@ -274,6 +278,7 @@ class TsConnectionState {
     String? serverFilePath,
     bool? serverFilesLoading,
     Object? serverFilesError = _sentinel,
+    Object? serverFileInfo = _sentinel,
     bool? voiceActive,
     bool? inputMuted,
     bool? outputMuted,
@@ -349,6 +354,9 @@ class TsConnectionState {
     serverFilesError: serverFilesError == _sentinel
         ? this.serverFilesError
         : serverFilesError as String?,
+    serverFileInfo: serverFileInfo == _sentinel
+        ? this.serverFileInfo
+        : serverFileInfo as ServerFileInfo?,
     voiceActive: voiceActive ?? this.voiceActive,
     inputMuted: inputMuted ?? this.inputMuted,
     outputMuted: outputMuted ?? this.outputMuted,
@@ -976,6 +984,25 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
             serverFilePath: path,
             serverFilesLoading: false,
             serverFilesError: ok ? null : (error ?? 'File listing failed'),
+          ),
+        );
+        break;
+
+      case 'file_info':
+        final ok = data['ok'] as bool? ?? false;
+        if (!ok) {
+          AppLog.d(_tag, 'file_info failed');
+          break;
+        }
+        _setSession(
+          cid,
+          _stateOf(cid).copyWith(
+            serverFileInfo: ServerFileInfo(
+              path: data['path'] as String? ?? '',
+              name: data['name'] as String? ?? '',
+              size: (data['size'] as num?)?.toInt() ?? 0,
+              modified: (data['modified'] as num?)?.toInt() ?? 0,
+            ),
           ),
         );
         break;
@@ -2625,6 +2652,33 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
     refreshFilePanel(cid);
   }
 
+  /// Renames a file on the server, then re-lists the current directory.
+  void renameServerFile(
+    int cid, {
+    required String oldName,
+    required String newName,
+    int? targetChannelId,
+  }) {
+    if (!_stateOf(cid).connected || oldName.isEmpty || newName.isEmpty) return;
+    final channelId = _stateOf(cid).selectedChannelId ?? 0;
+    TsNative.renameFile(
+      connectionId: cid,
+      channelId: channelId,
+      oldName: oldName,
+      newName: newName,
+      targetChannelId: targetChannelId,
+    );
+    refreshFilePanel(cid);
+  }
+
+  /// Requests the metadata of a file on the server (`ftgetfileinfo`). The
+  /// `file_info` event carries the result into `serverFileInfo`.
+  void fileInfo(int cid, String name) {
+    if (!_stateOf(cid).connected || name.isEmpty) return;
+    final channelId = _stateOf(cid).selectedChannelId ?? 0;
+    TsNative.fileInfo(connectionId: cid, channelId: channelId, name: name);
+  }
+
   /// Cancels an in-flight transfer (best effort: only a transfer that has not
   /// begun streaming is actually cancelled).
   bool cancelTransfer(int cid, int transferId) {
@@ -2895,6 +2949,17 @@ class TsConnectionNotifier {
       _controller.deleteServerFile(connectionId, path);
   void createChannelDirectory(String path) =>
       _controller.createChannelDirectory(connectionId, path);
+  void renameServerFile({
+    required String oldName,
+    required String newName,
+    int? targetChannelId,
+  }) => _controller.renameServerFile(
+    connectionId,
+    oldName: oldName,
+    newName: newName,
+    targetChannelId: targetChannelId,
+  );
+  void fileInfo(String name) => _controller.fileInfo(connectionId, name);
   void createChannel({
     required int parentId,
     required String name,
