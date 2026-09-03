@@ -328,3 +328,24 @@ puis `FileListFinished`. `DeleteFile` (`ftdeletefile` cid cpw name), `CreateDire
   `request_id`), `_FileBrowserSheet` réactif.
 
 > **Reste** : `ftgetfileinfo`, `ftrenamefile`, copie, validation appareil.
+
+## 19. Phase 25 — recherche globale (canaux + clients + fichiers)
+
+Résumé (voir `docs/PHASE-25-RECHERCHE-GLOBALE.md`). Purement côté Dart, aucun changement moteur.
+
+### Modèle testable `lib/models/server_search.dart`
+- `searchServer(query, channels:, clients:, files:)` → `ServerSearchHits {channels,clients,files}`
+  (filtre insensible à la casse, requête vide ⇒ vide).
+- `channelPath(channels, channelId)` → `Parent › Enfant › …`.
+
+### UI
+- Bouton `Icons.search` dans l'en-tête « Channels » → `_GlobalSearchSheet`
+  (champ unique, sections Canaux/Utilisateurs/Fichiers, chemin en sous-titre).
+- Actions : rejoindre un canal, popover volume utilisateur, ouvrir le navigateur de fichiers
+  à un répertoire trouvé.
+
+### Tests
+- `test/server_search_test.dart` (filtrage + chemin).
+
+> **Reste** : TSDNS multi-endpoints + `androidId`, refactor JNI direct PCM 16 bits (D4),
+> `ftgetfileinfo`/`ftrenamefile`, validation appareil.

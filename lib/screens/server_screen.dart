@@ -17,6 +17,7 @@ import '../models/file_transfer.dart';
 import '../models/server_file.dart';
 import '../models/reconnect_policy.dart';
 import '../models/server.dart';
+import '../models/server_search.dart';
 import '../models/ts_state.dart';
 import '../services/foreground_service.dart';
 import '../services/icon_cache.dart';
@@ -348,13 +349,28 @@ class _SessionTabState extends ConsumerState<_SessionTab> {
             padding: const EdgeInsets.all(8),
             color: context.ts.appbar,
             width: double.infinity,
-            child: Text(
-              AppLocalizations.of(context).channels,
-              style: TextStyle(
-                color: context.ts.textPrimary,
-                fontSize: 13,
-                fontWeight: FontWeight.bold,
-              ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    AppLocalizations.of(context).channels,
+                    style: TextStyle(
+                      color: context.ts.textPrimary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  iconSize: 18,
+                  icon: Icon(Icons.search, color: context.ts.textSecondary),
+                  tooltip: 'Search',
+                  onPressed: () => _openGlobalSearch(conn, notifier),
+                ),
+              ],
             ),
           ),
           Expanded(
@@ -1028,6 +1044,24 @@ class _SessionTabState extends ConsumerState<_SessionTab> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
       ),
       builder: (ctx) => _FileBrowserSheet(connectionId: cid),
+    );
+  }
+
+  /// Opens a global search over channels, clients and files of this server —
+  /// the equivalent of the desktop client's "search" that returns the matching
+  /// channel path, user and file and lets the user act on it directly.
+  void _openGlobalSearch(
+    TsConnectionState conn,
+    TsConnectionNotifier notifier,
+  ) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: context.ts.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+      ),
+      builder: (ctx) => _GlobalSearchSheet(connectionId: widget.connectionId),
     );
   }
 
@@ -2521,6 +2555,299 @@ class _FileBrowserSheet extends ConsumerWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Global search over channels, clients and files of one server.
+///
+/// A single field searches the channel tree (by name, showing the parent path),
+/// the roster (by nickname) and the current channel's file listing (by name),
+/// then lets the user act on the result: join a channel, open a client's
+/// volume, or open the file browser at a found directory.
+class _GlobalSearchSheet extends ConsumerStatefulWidget {
+  final int connectionId;
+
+  const _GlobalSearchSheet({required this.connectionId});
+
+  @override
+  ConsumerState<_GlobalSearchSheet> createState() => _GlobalSearchSheetState();
+}
+
+class _GlobalSearchSheetState extends ConsumerState<_GlobalSearchSheet> {
+  final TextEditingController _controller = TextEditingController();
+  String _query = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(() => setState(() => _query = _controller.text));
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  String _pathOf(TsConnectionState conn, int channelId) =>
+      channelPath(conn.channels, channelId);
+
+  @override
+  Widget build(BuildContext context) {
+    final session = ref.watch(tsSessionProvider(widget.connectionId));
+    final conn = session.state;
+    final notifier = session.actions;
+
+    final hits = searchServer(
+      _query,
+      channels: conn.channels,
+      clients: conn.clients,
+      files: conn.serverFiles,
+    );
+    final channelMatches = hits.channels;
+    final clientMatches = hits.clients;
+    final fileMatches = hits.files;
+
+    return SafeArea(
+      child: SizedBox(
+        height: MediaQuery.of(context).size.height * 0.78,
+        child: Column(
+          children: [
+            // Field.
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+              child: Row(
+                children: [
+                  Icon(Icons.search, size: 18, color: context.ts.textSecondary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: _controller,
+                      autofocus: true,
+                      style: TextStyle(color: context.ts.textPrimary),
+                      decoration: const InputDecoration(
+                        hintText: 'Channel, user or file…',
+                        border: InputBorder.none,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.close, color: context.ts.textSecondary),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: _query.trim().isEmpty
+                  ? _hint(context)
+                  : ListView(
+                      padding: EdgeInsets.zero,
+                      children: [
+                        if (channelMatches.isNotEmpty) ...[
+                          _sectionHeader(context, 'Channels'),
+                          for (final channel in channelMatches.take(30))
+                            ListTile(
+                              dense: true,
+                              leading: Icon(
+                                channel.children(conn.channels).isEmpty
+                                    ? Icons.tag
+                                    : Icons.folder,
+                                size: 16,
+                                color: context.ts.accent,
+                              ),
+                              title: Text(
+                                channel.name,
+                                style: TextStyle(
+                                  color: context.ts.textPrimary,
+                                  fontSize: 13,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              subtitle: _pathOf(conn, channel.parentId).isEmpty
+                                  ? null
+                                  : Text(
+                                      _pathOf(conn, channel.parentId),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: context.ts.textSecondary,
+                                        fontSize: 10,
+                                      ),
+                                    ),
+                              onTap: () => notifier.selectChannel(channel.id),
+                            ),
+                        ],
+                        if (clientMatches.isNotEmpty) ...[
+                          _sectionHeader(context, 'Users'),
+                          for (final client in clientMatches.take(30))
+                            ListTile(
+                              dense: true,
+                              leading: Icon(
+                                Icons.person,
+                                size: 16,
+                                color: context.ts.textSecondary,
+                              ),
+                              title: Text(
+                                client.nickname,
+                                style: TextStyle(
+                                  color: context.ts.textPrimary,
+                                  fontSize: 13,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              subtitle: _pathOf(conn, client.channelId).isEmpty
+                                  ? null
+                                  : Text(
+                                      _pathOf(conn, client.channelId),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: context.ts.textSecondary,
+                                        fontSize: 10,
+                                      ),
+                                    ),
+                              onTap: () => _openClientVolume(client.id),
+                            ),
+                        ],
+                        if (fileMatches.isNotEmpty) ...[
+                          _sectionHeader(context, 'Files'),
+                          for (final file in fileMatches.take(30))
+                            ListTile(
+                              dense: true,
+                              leading: Icon(
+                                file.isDirectory
+                                    ? Icons.folder
+                                    : Icons.insert_drive_file,
+                                size: 16,
+                                color: context.ts.textSecondary,
+                              ),
+                              title: Text(
+                                file.isDirectory ? '${file.name}/' : file.name,
+                                style: TextStyle(
+                                  color: context.ts.textPrimary,
+                                  fontSize: 13,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              subtitle: Text(
+                                file.isDirectory ? 'Folder' : file.sizeLabel,
+                                style: TextStyle(
+                                  color: context.ts.textSecondary,
+                                  fontSize: 10,
+                                ),
+                              ),
+                              onTap: file.isDirectory
+                                  ? () => notifier.listChannelFiles(
+                                      path: conn.serverFilePath == '/'
+                                          ? '/${file.name}'
+                                          : '${conn.serverFilePath}/${file.name}',
+                                    )
+                                  : null,
+                            ),
+                        ],
+                        if (channelMatches.isEmpty &&
+                            clientMatches.isEmpty &&
+                            fileMatches.isEmpty)
+                          Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Text(
+                              'No results',
+                              style: TextStyle(
+                                color: context.ts.textSecondary,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _sectionHeader(BuildContext context, String label) => Container(
+    width: double.infinity,
+    color: context.ts.appbar,
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+    child: Text(
+      label,
+      style: TextStyle(
+        color: context.ts.textSecondary,
+        fontSize: 11,
+        fontWeight: FontWeight.bold,
+      ),
+    ),
+  );
+
+  Widget _hint(BuildContext context) => Center(
+    child: Padding(
+      padding: const EdgeInsets.all(24),
+      child: Text(
+        'Search channels, users and files of this server.',
+        style: TextStyle(color: context.ts.textSecondary, fontSize: 13),
+      ),
+    ),
+  );
+
+  void _openClientVolume(int clientId) {
+    // Reuse the same volume dialog as the roster: pop the search sheet first so
+    // the volume dialog renders above the channel view.
+    Navigator.pop(context);
+    final session = ref.read(tsSessionProvider(widget.connectionId));
+    // The volume dialog lives in the parent screen; we invoke it here so the
+    // search result is directly actionable.
+    _showVolumeForClient(session.actions, clientId);
+  }
+
+  /// Minimal volume popover for a single client, mirroring the roster action.
+  void _showVolumeForClient(TsConnectionNotifier notifier, int clientId) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        final session = ref.watch(tsSessionProvider(widget.connectionId));
+        final client = session.state.clients
+            .where((c) => c.id == clientId)
+            .firstOrNull;
+        var volume = client?.volume ?? 0.0;
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) => AlertDialog(
+            backgroundColor: context.ts.card,
+            title: Text(
+              client?.nickname ?? 'User',
+              style: TextStyle(color: context.ts.textPrimary),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  volume >= 0
+                      ? '+${volume.toStringAsFixed(1)} dB'
+                      : '${volume.toStringAsFixed(1)} dB',
+                  style: TextStyle(color: context.ts.textSecondary),
+                ),
+                Slider(
+                  min: -20,
+                  max: 20,
+                  value: volume.clamp(-20.0, 20.0),
+                  onChanged: (v) => setDialogState(() => volume = v),
+                  onChangeEnd: (v) => notifier.setClientVolume(clientId, v),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Close'),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
