@@ -366,17 +366,23 @@ class MicStreamHandler(private val activity: MainActivity) : EventChannel.Stream
                 android.os.Process.setThreadPriority(
                     android.os.Process.THREAD_PRIORITY_URGENT_AUDIO,
                 )
+                // Reused every frame: allocating a 3840-byte array 50×/s (200 kB/s
+                // of garbage) is what the legacy path did. The frame is consumed
+                // synchronously by the codec, so reusing it is safe.
+                val bytes = ByteArray(960 * 4)
+                val byteBuffer = ByteBuffer.wrap(bytes)
+                    .order(ByteOrder.LITTLE_ENDIAN)
+                    .asFloatBuffer()
                 while (activity.isRecording) {
                     // Blocking read: no polling loop, no sleep, no wakeups
                     // while the microphone has nothing to give.
                     val data = activity.readMicBuffer() ?: continue
-                    val bytes = ByteArray(data.size * 4)
-                    // LITTLE_ENDIAN matches Dart's Float32List on ARM.
-                    ByteBuffer.wrap(bytes)
-                        .order(ByteOrder.LITTLE_ENDIAN)
-                        .asFloatBuffer()
-                        .put(data)
-                    activity.runOnUiThread { sink?.success(bytes) }
+                    byteBuffer.clear()
+                    byteBuffer.put(data, 0, data.size)
+                    // Fire directly on the capture thread. The event codec
+                    // serializes synchronously, so `bytes` is fully consumed
+                    // before the next read — no per-frame UI thread dispatch.
+                    sink?.success(bytes)
                 }
             }.also { it.start() }
         }

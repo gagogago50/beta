@@ -26,6 +26,18 @@ class AudioService {
   double get micRms => _micRms;
   void Function(double rms)? onMicLevel;
 
+  // ─── Zero-allocation mic path (D4) ────────────────────────────────
+  //
+  // The legacy audio path allocated a fresh Float32List, a ByteData view and
+  // a malloc'd Float pointer for every 20 ms frame — 50×/s of garbage. Here
+  // the FFI pointer is allocated once and reused; the per-frame work is one
+  // native float copy straight into it (no GC allocation during the hot loop).
+  //
+  // Frame length is fixed by the capture (960 samples = 20 ms @ 48 kHz), but
+  // we size for any count to tolerate engine changes.
+  static const int _maxMicSamples = 960;
+  Pointer<Float>? _micPtr;
+
   Future<bool> start() async {
     if (_running) return true;
 
@@ -78,7 +90,17 @@ class AudioService {
 
     _stopMic();
     if (connectionId != 0) TsNative.stopAudio(connectionId);
+    // Free the reused FFI buffer so it is re-allocated (fresh) on next start.
+    _freeMicBuffer();
     AppLog.d('audio', 'stopped');
+  }
+
+  void _freeMicBuffer() {
+    final ptr = _micPtr;
+    if (ptr != null) {
+      malloc.free(ptr);
+      _micPtr = null;
+    }
   }
 
   void _startMic() {
@@ -99,34 +121,41 @@ class AudioService {
     _micSubscription = null;
   }
 
+  /// Decodes a little-endian float32 frame, computes RMS and forwards it to
+  /// the engine, all in a single pass over the data and without allocating
+  /// during the hot loop (the FFI pointer is reused across frames).
   void _handleMicData(Uint8List bytes) {
     final floatCount = bytes.length ~/ 4;
     if (floatCount == 0) return;
+    if (floatCount > _maxMicSamples) {
+      // Unexpectedly large frame: drop it rather than overflowing the buffer.
+      AppLog.w('audio', 'oversized mic frame ($floatCount)');
+      return;
+    }
     final bd = ByteData.sublistView(bytes);
-    final floats = Float32List(floatCount);
+
+    // Mic-only mode (no session): still report the level but never transmit.
+    final transmit = _running && connectionId != 0;
+    final ptr = transmit ? (_micPtr ??= malloc<Float>(_maxMicSamples)) : null;
+
     var sumSq = 0.0;
-    for (int i = 0; i < floatCount; i++) {
-      final s = bd.getFloat32(i * 4, Endian.little);
-      floats[i] = s;
-      sumSq += s * s;
+    if (ptr != null) {
+      for (int i = 0; i < floatCount; i++) {
+        final s = bd.getFloat32(i * 4, Endian.little);
+        sumSq += s * s;
+        ptr[i] = s;
+      }
+    } else {
+      for (int i = 0; i < floatCount; i++) {
+        final s = bd.getFloat32(i * 4, Endian.little);
+        sumSq += s * s;
+      }
     }
     _micRms = sqrt(sumSq / floatCount);
     onMicLevel?.call(_micRms);
-    _sendMicData(floats);
-  }
 
-  void _sendMicData(Float32List samples) {
-    if (!_running) return;
-    // Mic-only mode (no session): report the level but never transmit.
-    if (connectionId == 0) return;
-    final ptr = malloc<Float>(samples.length);
-    try {
-      for (int i = 0; i < samples.length; i++) {
-        ptr[i] = samples[i];
-      }
-      TsNative.sendAudio(connectionId, ptr, samples.length);
-    } finally {
-      malloc.free(ptr);
+    if (transmit && ptr != null) {
+      TsNative.sendAudio(connectionId, ptr, floatCount);
     }
   }
 }

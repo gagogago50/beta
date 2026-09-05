@@ -399,3 +399,21 @@ token tokencustomset token1 token2 clid cldbid cluid).
 
 > **Reste** : TSDNS multi-endpoints + `androidId` (couvert en partie par tsclientlib),
 > refactor JNI direct PCM 16 bits (D4), validation appareil.
+
+## 22. Phase 28 — boucle micro zéro-allocation (D4)
+
+Résumé (voir `docs/PHASE-28-ZERO-ALLOC-AUDIO.md`).
+
+### Dart (`audio_service.dart`)
+- `_micPtr` (`Pointer<Float>`) alloué une fois, réutilisé.
+- Lecture `ByteData` en une passe : RMS + écriture directe dans le pointeur FFI.
+- Suppression `Float32List` intermédiaire + `malloc`/`free` par trame.
+- Chemin mic-only (pas de session) : niveau seul, pas de transmission.
+
+### Kotlin (`MicStreamHandler`)
+- `ByteArray(960*4)` + `ByteBuffer` réutilisés (au lieu d'alloués par trame).
+- `sink.success(bytes)` appelé directement sur le thread de capture (sérialisation synchrone),
+  au lieu de `runOnUiThread` par trame (≈ élimine 50 dispatch UI/s).
+
+> **Reste** : JNI direct PCM 16 bits (contourner l'EventChannel), TSDNS multi-endpoints +
+> `androidId`, validation appareil.
