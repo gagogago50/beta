@@ -13,6 +13,8 @@ import '../models/channel.dart';
 import '../models/client.dart';
 import '../models/contact_settings.dart';
 import '../models/file_transfer.dart';
+import '../models/server_ban.dart';
+import '../models/server_complain.dart';
 import '../models/server_file.dart';
 import '../models/poll_policy.dart';
 import '../models/reconnect_policy.dart';
@@ -100,6 +102,19 @@ class TsConnectionState {
   /// Human confirmation of the last successfully used permission key, set by
   /// the `token_used` event and cleared once the UI has shown it.
   final String? tokenConfirmation;
+
+  /// The ban table (`ban_list` events), for the "Bans" admin view.
+  final List<ServerBan> bans;
+
+  /// The complaint table (`complain_list` events).
+  final List<ServerComplain> complains;
+
+  /// Channel ids the client is currently subscribed to (hears). The engine
+  /// refreshes this on `channels_updated`; the UI offers subscribe/unsubscribe.
+  final Set<int> subscribedChannels;
+
+  /// Description of the channel requested via `channel_description`.
+  final String? channelDescription;
   final bool voiceActive;
   final bool inputMuted;
   final bool outputMuted;
@@ -213,6 +228,10 @@ class TsConnectionState {
     this.serverFilesError,
     this.serverFileInfo,
     this.tokenConfirmation,
+    this.bans = const [],
+    this.complains = const [],
+    this.subscribedChannels = const {},
+    this.channelDescription,
     this.voiceActive = false,
     this.inputMuted = false,
     this.outputMuted = false,
@@ -285,6 +304,10 @@ class TsConnectionState {
     Object? serverFilesError = _sentinel,
     Object? serverFileInfo = _sentinel,
     Object? tokenConfirmation = _sentinel,
+    List<ServerBan>? bans,
+    List<ServerComplain>? complains,
+    Set<int>? subscribedChannels,
+    Object? channelDescription = _sentinel,
     bool? voiceActive,
     bool? inputMuted,
     bool? outputMuted,
@@ -366,6 +389,12 @@ class TsConnectionState {
     tokenConfirmation: tokenConfirmation == _sentinel
         ? this.tokenConfirmation
         : tokenConfirmation as String?,
+    bans: bans ?? this.bans,
+    complains: complains ?? this.complains,
+    subscribedChannels: subscribedChannels ?? this.subscribedChannels,
+    channelDescription: channelDescription == _sentinel
+        ? this.channelDescription
+        : channelDescription as String?,
     voiceActive: voiceActive ?? this.voiceActive,
     inputMuted: inputMuted ?? this.inputMuted,
     outputMuted: outputMuted ?? this.outputMuted,
@@ -1024,6 +1053,38 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
         _setSession(cid, _stateOf(cid).copyWith(tokenConfirmation: granted));
         break;
 
+      case 'ban_list':
+        final ban = ServerBan.fromJson(data);
+        final bans = [..._stateOf(cid).bans];
+        // De-duplicate by ban id (the ban table may be re-sent whole).
+        bans.removeWhere((b) => b.banId == ban.banId);
+        bans.add(ban);
+        bans.sort((a, b) => a.banId.compareTo(b.banId));
+        _setSession(cid, _stateOf(cid).copyWith(bans: bans));
+        break;
+
+      case 'complain_list':
+        final complain = ServerComplain.fromJson(data);
+        final complains = [..._stateOf(cid).complains, complain];
+        _setSession(cid, _stateOf(cid).copyWith(complains: complains));
+        break;
+
+      case 'channel_description':
+        _setSession(
+          cid,
+          _stateOf(
+            cid,
+          ).copyWith(channelDescription: data['description'] as String? ?? ''),
+        );
+        break;
+
+      case 'client_updated':
+        // A client's server-group membership changed; refresh the roster so the
+        // affected client shows its new groups.
+        _lastRosterRefresh = DateTime.fromMillisecondsSinceEpoch(0);
+        refreshRoster(cid);
+        break;
+
       case 'command_throttled':
         final rt = _rt[cid];
         if (rt != null) {
@@ -1621,6 +1682,124 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
       _setSession(
         cid,
         _stateOf(cid).copyWith(error: 'Unable to queue the ban'),
+      );
+    }
+  }
+
+  /// Bans a unique identifier (the user's persistent TS3 UID, valid everywhere).
+  void banUid(int cid, String uid, {int seconds = 0, String? reason}) {
+    if (!_stateOf(cid).connected || uid.trim().isEmpty) return;
+    if (!TsNative.banUid(cid, uid.trim(), seconds: seconds, reason: reason)) {
+      _setSession(
+        cid,
+        _stateOf(cid).copyWith(error: 'Unable to queue the ban by UID'),
+      );
+    }
+  }
+
+  /// Bans an address and/or a nickname.
+  void banAddress(
+    int cid, {
+    String? ip,
+    String? name,
+    int seconds = 0,
+    String? reason,
+  }) {
+    if (!_stateOf(cid).connected) return;
+    if (!TsNative.banAddress(
+      cid,
+      ip: ip,
+      name: name,
+      seconds: seconds,
+      reason: reason,
+    )) {
+      _setSession(
+        cid,
+        _stateOf(cid).copyWith(error: 'Unable to queue the ban by address'),
+      );
+    }
+  }
+
+  /// Deletes a ban from the ban table.
+  void banDelete(int cid, int banId) {
+    if (!_stateOf(cid).connected) return;
+    TsNative.banDelete(cid, banId);
+    final bans = _stateOf(cid).bans.where((b) => b.banId != banId).toList();
+    _setSession(cid, _stateOf(cid).copyWith(bans: bans));
+  }
+
+  /// Requests the ban table.
+  void listBans(int cid) {
+    if (!_stateOf(cid).connected) return;
+    TsNative.listBans(cid);
+  }
+
+  /// Subscribes the client to one channel (start hearing it).
+  void subscribeChannel(int cid, int channelId) {
+    if (!_stateOf(cid).connected) return;
+    if (!TsNative.subscribeChannel(cid, channelId)) {
+      _setSession(
+        cid,
+        _stateOf(cid).copyWith(error: 'Unable to subscribe to the channel'),
+      );
+      return;
+    }
+    final set = Set<int>.from(_stateOf(cid).subscribedChannels)..add(channelId);
+    _setSession(cid, _stateOf(cid).copyWith(subscribedChannels: set));
+  }
+
+  /// Unsubscribes the client from one channel (stop hearing it).
+  void unsubscribeChannel(int cid, int channelId) {
+    if (!_stateOf(cid).connected) return;
+    if (!TsNative.unsubscribeChannel(cid, channelId)) {
+      _setSession(
+        cid,
+        _stateOf(cid).copyWith(error: 'Unable to unsubscribe from the channel'),
+      );
+      return;
+    }
+    final set = Set<int>.from(_stateOf(cid).subscribedChannels)
+      ..remove(channelId);
+    _setSession(cid, _stateOf(cid).copyWith(subscribedChannels: set));
+  }
+
+  /// Requests a channel's description.
+  void requestChannelDescription(int cid, int channelId) {
+    if (!_stateOf(cid).connected) return;
+    TsNative.channelDescription(cid, channelId);
+  }
+
+  /// Adds a client to a server group.
+  void addClientToGroup(int cid, int clientId, int groupId) {
+    if (!_stateOf(cid).connected) return;
+    if (!TsNative.addClientToGroup(cid, clientId, groupId)) {
+      _setSession(
+        cid,
+        _stateOf(cid).copyWith(error: 'Unable to add the client to the group'),
+      );
+    }
+  }
+
+  /// Removes a client from a server group.
+  void removeClientFromGroup(int cid, int clientId, int groupId) {
+    if (!_stateOf(cid).connected) return;
+    if (!TsNative.removeClientFromGroup(cid, clientId, groupId)) {
+      _setSession(
+        cid,
+        _stateOf(
+          cid,
+        ).copyWith(error: 'Unable to remove the client from the group'),
+      );
+    }
+  }
+
+  /// Files a complaint against a client.
+  void complainAdd(int cid, int clientId, String message) {
+    if (!_stateOf(cid).connected || message.trim().isEmpty) return;
+    if (!TsNative.complainAdd(cid, clientId, message.trim())) {
+      _setSession(
+        cid,
+        _stateOf(cid).copyWith(error: 'Unable to file the complaint'),
       );
     }
   }
@@ -2907,6 +3086,34 @@ class TsConnectionNotifier {
       );
   void banClient(int clientId, {int seconds = 0, String? reason}) => _controller
       .banClient(connectionId, clientId, seconds: seconds, reason: reason);
+  void banUid(String uid, {int seconds = 0, String? reason}) =>
+      _controller.banUid(connectionId, uid, seconds: seconds, reason: reason);
+  void banAddress({
+    String? ip,
+    String? name,
+    int seconds = 0,
+    String? reason,
+  }) => _controller.banAddress(
+    connectionId,
+    ip: ip,
+    name: name,
+    seconds: seconds,
+    reason: reason,
+  );
+  void banDelete(int banId) => _controller.banDelete(connectionId, banId);
+  void listBans() => _controller.listBans(connectionId);
+  void subscribeChannel(int channelId) =>
+      _controller.subscribeChannel(connectionId, channelId);
+  void unsubscribeChannel(int channelId) =>
+      _controller.unsubscribeChannel(connectionId, channelId);
+  void requestChannelDescription(int channelId) =>
+      _controller.requestChannelDescription(connectionId, channelId);
+  void addClientToGroup(int clientId, int groupId) =>
+      _controller.addClientToGroup(connectionId, clientId, groupId);
+  void removeClientFromGroup(int clientId, int groupId) =>
+      _controller.removeClientFromGroup(connectionId, clientId, groupId);
+  void complainAdd(int clientId, String message) =>
+      _controller.complainAdd(connectionId, clientId, message);
   void pokeClient(int clientId, String message) =>
       _controller.pokeClient(connectionId, clientId, message);
   void moveClient(int clientId, int channelId, {String? password}) =>

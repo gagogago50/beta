@@ -160,6 +160,39 @@ typedef _KickClientDart = int Function(int, int, int, Pointer<Utf8>);
 // ts_ban_client(connection_id, client_id, seconds, reason) -> bool
 typedef _BanClientNative =
     Uint8 Function(Uint64, Uint16, Uint64, Pointer<Utf8>);
+// ts_ban_uid(connection_id, uid, seconds, reason) -> bool
+typedef _BanUidNative =
+    Uint8 Function(Uint64, Pointer<Utf8>, Uint64, Pointer<Utf8>);
+typedef _BanUidDart = int Function(int, Pointer<Utf8>, int, Pointer<Utf8>);
+// ts_ban_address(connection_id, ip, name, seconds, reason) -> bool
+typedef _BanAddressNative =
+    Uint8 Function(Uint64, Pointer<Utf8>, Pointer<Utf8>, Uint64, Pointer<Utf8>);
+typedef _BanAddressDart =
+    int Function(int, Pointer<Utf8>, Pointer<Utf8>, int, Pointer<Utf8>);
+// ts_ban_delete(connection_id, ban_id) -> bool
+typedef _BanDeleteNative = Uint8 Function(Uint64, Uint32);
+typedef _BanDeleteDart = int Function(int, int);
+// ts_list_bans(connection_id) -> bool
+typedef _ListBansNative = Uint8 Function(Uint64);
+typedef _ListBansDart = int Function(int);
+// ts_subscribe_channel(connection_id, channel_id) -> bool
+typedef _SubscribeChannelNative = Uint8 Function(Uint64, Uint64);
+typedef _SubscribeChannelDart = int Function(int, int);
+// ts_unsubscribe_channel(connection_id, channel_id) -> bool
+typedef _UnsubscribeChannelNative = Uint8 Function(Uint64, Uint64);
+typedef _UnsubscribeChannelDart = int Function(int, int);
+// ts_channel_description(connection_id, channel_id) -> bool
+typedef _ChannelDescriptionNative = Uint8 Function(Uint64, Uint64);
+typedef _ChannelDescriptionDart = int Function(int, int);
+// ts_add_client_to_group(connection_id, client_id, group_id) -> bool
+typedef _AddToGroupNative = Uint8 Function(Uint64, Uint16, Uint64);
+typedef _AddToGroupDart = int Function(int, int, int);
+// ts_remove_client_from_group(connection_id, client_id, group_id) -> bool
+typedef _RemoveFromGroupNative = Uint8 Function(Uint64, Uint16, Uint64);
+typedef _RemoveFromGroupDart = int Function(int, int, int);
+// ts_complain_add(connection_id, client_id, message) -> bool
+typedef _ComplainAddNative = Uint8 Function(Uint64, Uint16, Pointer<Utf8>);
+typedef _ComplainAddDart = int Function(int, int, Pointer<Utf8>);
 typedef _BanClientDart = int Function(int, int, int, Pointer<Utf8>);
 
 // ts_poke_client(connection_id, client_id, message) -> bool
@@ -433,6 +466,38 @@ final _kickClient = _lib.lookupFunction<_KickClientNative, _KickClientDart>(
 );
 final _banClient = _lib.lookupFunction<_BanClientNative, _BanClientDart>(
   'ts_ban_client',
+);
+final _banUid = _lib.lookupFunction<_BanUidNative, _BanUidDart>('ts_ban_uid');
+final _banAddress = _lib.lookupFunction<_BanAddressNative, _BanAddressDart>(
+  'ts_ban_address',
+);
+final _banDelete = _lib.lookupFunction<_BanDeleteNative, _BanDeleteDart>(
+  'ts_ban_delete',
+);
+final _listBans = _lib.lookupFunction<_ListBansNative, _ListBansDart>(
+  'ts_list_bans',
+);
+final _subscribeChannel = _lib
+    .lookupFunction<_SubscribeChannelNative, _SubscribeChannelDart>(
+      'ts_subscribe_channel',
+    );
+final _unsubscribeChannel = _lib
+    .lookupFunction<_UnsubscribeChannelNative, _UnsubscribeChannelDart>(
+      'ts_unsubscribe_channel',
+    );
+final _channelDescription = _lib
+    .lookupFunction<_ChannelDescriptionNative, _ChannelDescriptionDart>(
+      'ts_channel_description',
+    );
+final _addToGroup = _lib.lookupFunction<_AddToGroupNative, _AddToGroupDart>(
+  'ts_add_client_to_group',
+);
+final _removeFromGroup = _lib
+    .lookupFunction<_RemoveFromGroupNative, _RemoveFromGroupDart>(
+      'ts_remove_client_from_group',
+    );
+final _complainAdd = _lib.lookupFunction<_ComplainAddNative, _ComplainAddDart>(
+  'ts_complain_add',
 );
 final _pokeClient = _lib.lookupFunction<_PokeClientNative, _PokeClientDart>(
   'ts_poke_client',
@@ -808,6 +873,92 @@ class TsNative {
     final ptr = _strToPtr(reason);
     try {
       return _banClient(connectionId, clientId, seconds, ptr) != 0;
+    } finally {
+      _freeInputString(ptr);
+    }
+  }
+
+  /// Bans a unique identifier. `seconds == 0` = permanent.
+  static bool banUid(
+    int connectionId,
+    String uid, {
+    int seconds = 0,
+    String? reason,
+  }) {
+    final uidPtr = _strToPtr(uid);
+    final reasonPtr = _strToPtr(reason);
+    try {
+      return _banUid(connectionId, uidPtr, seconds, reasonPtr) != 0;
+    } finally {
+      _freeInputString(uidPtr);
+      _freeInputString(reasonPtr);
+    }
+  }
+
+  /// Bans an address and/or a nickname.
+  static bool banAddress(
+    int connectionId, {
+    String? ip,
+    String? name,
+    int seconds = 0,
+    String? reason,
+  }) {
+    final ipPtr = _strToPtr(ip);
+    final namePtr = _strToPtr(name);
+    final reasonPtr = _strToPtr(reason);
+    try {
+      return _banAddress(connectionId, ipPtr, namePtr, seconds, reasonPtr) != 0;
+    } finally {
+      _freeInputString(ipPtr);
+      _freeInputString(namePtr);
+      _freeInputString(reasonPtr);
+    }
+  }
+
+  /// Deletes a ban from the ban table.
+  static bool banDelete(int connectionId, int banId) {
+    return _banDelete(connectionId, banId) != 0;
+  }
+
+  /// Requests the ban table; the engine emits `ban_list` events for it.
+  static bool listBans(int connectionId) {
+    return _listBans(connectionId) != 0;
+  }
+
+  /// Subscribes the client to one channel (start hearing it).
+  static bool subscribeChannel(int connectionId, int channelId) {
+    return _subscribeChannel(connectionId, channelId) != 0;
+  }
+
+  /// Unsubscribes the client from one channel (stop hearing it).
+  static bool unsubscribeChannel(int connectionId, int channelId) {
+    return _unsubscribeChannel(connectionId, channelId) != 0;
+  }
+
+  /// Requests a channel's description (`channel_description` event).
+  static bool channelDescription(int connectionId, int channelId) {
+    return _channelDescription(connectionId, channelId) != 0;
+  }
+
+  /// Adds a client to a server group.
+  static bool addClientToGroup(int connectionId, int clientId, int groupId) {
+    return _addToGroup(connectionId, clientId, groupId) != 0;
+  }
+
+  /// Removes a client from a server group.
+  static bool removeClientFromGroup(
+    int connectionId,
+    int clientId,
+    int groupId,
+  ) {
+    return _removeFromGroup(connectionId, clientId, groupId) != 0;
+  }
+
+  /// Files a complaint against a client.
+  static bool complainAdd(int connectionId, int clientId, String message) {
+    final ptr = _strToPtr(message);
+    try {
+      return _complainAdd(connectionId, clientId, ptr) != 0;
     } finally {
       _freeInputString(ptr);
     }

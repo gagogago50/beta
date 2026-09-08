@@ -70,6 +70,49 @@ pub enum Command {
         seconds: u64,
         reason: Option<String>,
     },
+    /// Ban a unique identifier (`banadd uid=…`). `seconds == 0` = permanent.
+    BanUid {
+        uid: String,
+        seconds: u64,
+        reason: Option<String>,
+    },
+    /// Ban an address / nickname (`banadd ip=… name=…`).
+    BanAddress {
+        ip: Option<String>,
+        name: Option<String>,
+        seconds: u64,
+        reason: Option<String>,
+    },
+    /// Delete a single ban and list the ban table.
+    BanDelete {
+        ban_id: u32,
+    },
+    /// Request the ban table (`banlist`).
+    ListBans,
+    /// Subscribe / unsubscribe to one channel (hear / stop hearing it).
+    SubscribeChannel {
+        channel_id: u64,
+        unsubscribe: bool,
+    },
+    /// Request the description of a channel (`channeldescription`).
+    ChannelDescription {
+        channel_id: u64,
+    },
+    /// Add a client to a server group (`servergroupaddclient`).
+    AddClientToGroup {
+        db_id: u64,
+        group_id: u64,
+    },
+    /// Remove a client from a server group (`servergroupdelclient`).
+    RemoveClientFromGroup {
+        db_id: u64,
+        group_id: u64,
+    },
+    /// File a complaint against a client (`complainadd`).
+    ComplainAdd {
+        db_id: u64,
+        message: String,
+    },
     /// Starts a file download (`ftinitdownload`). The engine answers with a
     /// `file_transfer` event once the TCP transfer finished or failed.
     DownloadFile {
@@ -203,7 +246,18 @@ impl Command {
             Command::SetNickname { .. } => 2.0,
             // Moderation commands are rare but heavily audited server-side;
             // price them like a text message so a stuck UI cannot spam them.
-            Command::KickClient { .. } | Command::BanClient { .. } => 2.0,
+            Command::KickClient { .. }
+            | Command::BanClient { .. }
+            | Command::BanUid { .. }
+            | Command::BanAddress { .. }
+            | Command::BanDelete { .. }
+            | Command::AddClientToGroup { .. }
+            | Command::RemoveClientFromGroup { .. }
+            | Command::ComplainAdd { .. } => 2.0,
+            // Cheap control commands (subscriptions, list, description).
+            Command::ListBans
+            | Command::SubscribeChannel { .. }
+            | Command::ChannelDescription { .. } => 1.0,
             Command::PokeClient { .. } => 2.0,
             // Cheap on the command channel: the payload travels on a separate
             // TCP connection, only the handshake is a command.
@@ -252,6 +306,11 @@ impl Command {
                     Command::SetChannelCommander { .. },
                     Command::SetChannelCommander { .. }
                 )
+                | (
+                    Command::SubscribeChannel { .. },
+                    Command::SubscribeChannel { .. }
+                )
+                | (Command::ListBans, Command::ListBans)
         )
     }
 }
@@ -672,6 +731,42 @@ pub enum TsEvent {
         /// Same token repeated; useful to identify which one succeeded.
         client_db_id: u64,
     },
+    /// One entry of the ban table from a `banlist` reply.
+    #[serde(rename = "ban_list")]
+    BanList {
+        ban_id: u32,
+        ip: String,
+        name: String,
+        uid: String,
+        last_nickname: String,
+        created: u64,
+        duration: u64,
+        invoker_name: String,
+    },
+    /// One complaint from a `complainlist` reply.
+    #[serde(rename = "complain_list")]
+    ComplainList {
+        target_db_id: u64,
+        target_name: String,
+        from_db_id: u64,
+        from_name: String,
+        message: String,
+        timestamp: u64,
+    },
+    /// The description of a channel from a `channeldescription` reply.
+    #[serde(rename = "channel_description")]
+    ChannelDescription {
+        channel_id: u32,
+        description: String,
+    },
+    /// A client's roster line changed (e.g. server-group membership added or
+    /// removed). The UI may refresh the roster.
+    #[serde(rename = "client_updated")]
+    ClientUpdated {
+        client_id: u32,
+        /// Reason/message of the change, when the server provides one.
+        reason: String,
+    },
     /// Outgoing commands are being paced to stay under the server's flood
     /// threshold. `pending` is the current backlog.
     #[serde(rename = "command_throttled")]
@@ -789,6 +884,9 @@ pub struct TsClient {
     pub id: u32,
     pub nickname: String,
     pub channel_id: u32,
+    /// `client_database_id`: the stable per-server database id of this client,
+    /// used for ban-by-dbid and server-group membership management.
+    pub database_id: u64,
     pub channel_group_id: u64,
     pub channel_group_name: Option<String>,
     /// Icon of the channel group, 0 when the group has none. Icons are

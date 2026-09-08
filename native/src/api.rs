@@ -17,7 +17,7 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 use tsclientlib::messages::c2s::*;
 use tsclientlib::Reason;
-use tsclientlib::{ChannelId, ClientId};
+use tsclientlib::{ChannelId, ClientDbId, ClientId, ServerGroupId, UidBuf};
 use tsclientlib::{Connection, DisconnectOptions, Identity, OutCommandExt, StreamItem};
 use tsproto_packets::packets::{AudioData, CodecType, InAudioBuf, OutAudio};
 
@@ -212,6 +212,7 @@ fn refresh_from_book(
                 id: cid as u32,
                 nickname: c.name.clone(),
                 channel_id: c.channel.0 as u32,
+                database_id: c.database_id.0,
                 channel_group_id: c.channel_group.0,
                 channel_group_name: book
                     .channel_groups
@@ -1565,6 +1566,92 @@ fn handle_control_item(conn_id: crate::ConnectionId, item: StreamItem, con: &mut
                             );
                         }
                     }
+                    InMessage::ChannelDescriptionChanged(changed) => {
+                        // The server answered a `channeldescription` request:
+                        // the text lives in the channel's OptionalChannelData.
+                        for item in changed.iter() {
+                            let cid = item.channel_id.0 as u32;
+                            let description = con
+                                .get_state()
+                                .ok()
+                                .and_then(|book| book.channels.get(&item.channel_id))
+                                .and_then(|c| c.optional_data.as_ref())
+                                .map(|d| d.description.clone())
+                                .unwrap_or_default();
+                            push_event(
+                                conn_id,
+                                TsEvent::ChannelDescription {
+                                    channel_id: cid,
+                                    description,
+                                },
+                            );
+                        }
+                    }
+                    InMessage::BanList(bans) => {
+                        // The ban table, one entry per part. Emitted on demand
+                        // after `banlist` (or a ban add/delete).
+                        for item in bans.iter() {
+                            push_event(
+                                conn_id,
+                                TsEvent::BanList {
+                                    ban_id: item.ban_id,
+                                    ip: item.ip.to_string(),
+                                    name: item.name.clone(),
+                                    uid: item.uid.to_string(),
+                                    last_nickname: item.last_nickname.clone(),
+                                    created: item.created.unix_timestamp().max(0) as u64,
+                                    duration: item.duration.whole_seconds().max(0) as u64,
+                                    invoker_name: item.invoker_name.clone(),
+                                },
+                            );
+                        }
+                    }
+                    InMessage::ComplainList(complains) => {
+                        // The complaint table. Emitted after `complainlist`.
+                        for item in complains.iter() {
+                            push_event(
+                                conn_id,
+                                TsEvent::ComplainList {
+                                    target_db_id: item.target_client_db_id.0,
+                                    target_name: item.target_name.clone(),
+                                    from_db_id: item.from_client_db_id.0,
+                                    from_name: item.from_name.clone(),
+                                    message: item.message.clone(),
+                                    timestamp: item.timestamp.unix_timestamp().max(0) as u64,
+                                },
+                            );
+                        }
+                    }
+                    InMessage::ClientServerGroupAdded(added) => {
+                        // A client was added to a server group. Emit a roster
+                        // update so the UI refreshes the affected client.
+                        for item in added.iter() {
+                            push_event(
+                                conn_id,
+                                TsEvent::ClientUpdated {
+                                    client_id: item.client_id.0 as u32,
+                                    reason: format!(
+                                        "{} added {} to group {}",
+                                        item.invoker_name, item.name, item.server_group_id.0
+                                    ),
+                                },
+                            );
+                        }
+                    }
+                    InMessage::ClientServerGroupRemoved(removed) => {
+                        for item in removed.iter() {
+                            push_event(
+                                conn_id,
+                                TsEvent::ClientUpdated {
+                                    client_id: item.client_id.0 as u32,
+                                    reason: format!(
+                                        "{} removed {} from group {}",
+                                        item.invoker_name, item.name, item.server_group_id.0
+                                    ),
+                                },
+                            );
+                        }
+                    }
                     InMessage::CommandError(errors) => {
                         for error in errors.iter() {
                             if error.id == tsclientlib::TsError::Ok {
@@ -1950,6 +2037,92 @@ async fn event_loop(
                         ban_reason: reason.map(Cow::Owned),
                     };
                     let _ = OutBanClientMessage::new(&mut std::iter::once(part)).send(&mut con);
+                }
+                Command::BanUid {
+                    uid,
+                    seconds,
+                    reason,
+                } => {
+                    let uid_bytes = base64_decode_uid(&uid);
+                    let part = OutBanAddPart {
+                        ip: None,
+                        name: None,
+                        uid: uid_bytes.map(|b| Cow::Owned(UidBuf(b))),
+                        time: (seconds > 0).then(|| time::Duration::seconds(seconds as i64)),
+                        ban_reason: reason.map(Cow::Owned),
+                    };
+                    let _ = OutBanAddMessage::new(&mut std::iter::once(part)).send(&mut con);
+                }
+                Command::BanAddress {
+                    ip,
+                    name,
+                    seconds,
+                    reason,
+                } => {
+                    let ip = ip.and_then(|s| s.parse::<std::net::IpAddr>().ok());
+                    let part = OutBanAddPart {
+                        ip,
+                        name: name.map(Cow::Owned),
+                        uid: None,
+                        time: (seconds > 0).then(|| time::Duration::seconds(seconds as i64)),
+                        ban_reason: reason.map(Cow::Owned),
+                    };
+                    let _ = OutBanAddMessage::new(&mut std::iter::once(part)).send(&mut con);
+                }
+                Command::BanDelete { ban_id } => {
+                    let part = OutBanDelPart { ban_id };
+                    let _ = OutBanDelMessage::new(&mut std::iter::once(part)).send(&mut con);
+                }
+                Command::ListBans => {
+                    let _ = OutBanListRequestMessage::new().send(&mut con);
+                }
+                Command::SubscribeChannel {
+                    channel_id,
+                    unsubscribe,
+                } => {
+                    if unsubscribe {
+                        let part = OutChannelUnsubscribePart {
+                            channel_id: ChannelId(channel_id),
+                        };
+                        let _ = OutChannelUnsubscribeMessage::new(&mut std::iter::once(part))
+                            .send(&mut con);
+                    } else {
+                        let part = OutChannelSubscribePart {
+                            channel_id: ChannelId(channel_id),
+                        };
+                        let _ = OutChannelSubscribeMessage::new(&mut std::iter::once(part))
+                            .send(&mut con);
+                    }
+                }
+                Command::ChannelDescription { channel_id } => {
+                    let part = OutChannelDescriptionRequestPart {
+                        channel_id: ChannelId(channel_id),
+                    };
+                    let _ = OutChannelDescriptionRequestMessage::new(&mut std::iter::once(part))
+                        .send(&mut con);
+                }
+                Command::AddClientToGroup { db_id, group_id } => {
+                    let part = OutServerGroupAddClientPart {
+                        server_group_id: ServerGroupId(group_id),
+                        client_db_id: ClientDbId(db_id),
+                    };
+                    let _ = OutServerGroupAddClientMessage::new(&mut std::iter::once(part))
+                        .send(&mut con);
+                }
+                Command::RemoveClientFromGroup { db_id, group_id } => {
+                    let part = OutServerGroupDelClientPart {
+                        server_group_id: ServerGroupId(group_id),
+                        client_db_id: ClientDbId(db_id),
+                    };
+                    let _ = OutServerGroupDelClientMessage::new(&mut std::iter::once(part))
+                        .send(&mut con);
+                }
+                Command::ComplainAdd { db_id, message } => {
+                    let part = OutComplainAddPart {
+                        target_client_db_id: ClientDbId(db_id),
+                        message: Cow::Owned(message),
+                    };
+                    let _ = OutComplainAddMessage::new(&mut std::iter::once(part)).send(&mut con);
                 }
                 Command::PokeClient { client_id, message } => {
                     let part = OutClientPokeRequestPart {
@@ -3480,6 +3653,45 @@ pub extern "C" fn ts_use_token(conn_id: crate::ConnectionId, token: *const c_cha
 
 // ─── Channel administration (permission-gated) ──────────────────────
 
+/// Minimal RFC 4648 base64 (standard alphabet, no padding) decoder for a
+/// TeamSpeak user UID. TeamSpeak UIDs are base64-encoded bytes; the protocol
+/// expects the *decoded* bytes in `banadd uid`. The crate has no base64
+/// dependency, so we decode the small fixed-size inputs by hand — a UID is
+/// ~30 characters and only ever hand-built here, so correctness trumps speed.
+fn base64_decode_uid(input: &str) -> Option<Vec<u8>> {
+    fn value(c: u8) -> Option<u8> {
+        match c {
+            b'A'..=b'Z' => Some(c - b'A'),
+            b'a'..=b'z' => Some(c - b'a' + 26),
+            b'0'..=b'9' => Some(c - b'0' + 52),
+            b'+' => Some(62),
+            b'/' => Some(63),
+            _ => None,
+        }
+    }
+    let input = input.trim_end_matches('=');
+    if input.is_empty() {
+        return None;
+    }
+    let mut out = Vec::with_capacity(input.len() * 3 / 4);
+    let mut buf = 0u32;
+    let mut bits = 0u8;
+    for &c in input.as_bytes() {
+        let v = value(c)?;
+        buf = (buf << 6) | v as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buf >> bits) as u8);
+        }
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
 /// Reads an optional C string, trimming and capping it. Returns None on null
 /// or blank input.
 fn opt_cstr(raw: *const c_char, max: usize) -> Option<String> {
@@ -3713,6 +3925,244 @@ pub extern "C" fn ts_ban_client(
             client_id,
             seconds,
             reason: optional_reason(reason),
+        },
+    )
+}
+
+/// Bans a unique identifier (`banadd uid=…`). `seconds == 0` = permanent.
+#[no_mangle]
+pub extern "C" fn ts_ban_uid(
+    conn_id: crate::ConnectionId,
+    uid: *const c_char,
+    seconds: u64,
+    reason: *const c_char,
+) -> u8 {
+    if uid.is_null() {
+        return 0;
+    }
+    let uid = unsafe { std::ffi::CStr::from_ptr(uid) }
+        .to_string_lossy()
+        .trim()
+        .to_string();
+    if uid.is_empty() {
+        return 0;
+    }
+    let connected = crate::session(conn_id)
+        .map(|state| state.lock().connected)
+        .unwrap_or(false);
+    if !connected {
+        return 0;
+    }
+    queue_command(
+        conn_id,
+        Command::BanUid {
+            uid,
+            seconds,
+            reason: optional_reason(reason),
+        },
+    )
+}
+
+/// Bans an address (`banadd ip=…`) and/or a nickname (`name=…`).
+#[no_mangle]
+pub extern "C" fn ts_ban_address(
+    conn_id: crate::ConnectionId,
+    ip: *const c_char,
+    name: *const c_char,
+    seconds: u64,
+    reason: *const c_char,
+) -> u8 {
+    let connected = crate::session(conn_id)
+        .map(|state| state.lock().connected)
+        .unwrap_or(false);
+    if !connected {
+        return 0;
+    }
+    let ip = opt_cstr(ip, 64).filter(|s| s.parse::<std::net::IpAddr>().is_ok());
+    let name = opt_cstr(name, 64);
+    if ip.is_none() && name.is_none() {
+        return 0;
+    }
+    queue_command(
+        conn_id,
+        Command::BanAddress {
+            ip,
+            name,
+            seconds,
+            reason: optional_reason(reason),
+        },
+    )
+}
+
+/// Deletes a single ban from the ban table (`bandel`).
+#[no_mangle]
+pub extern "C" fn ts_ban_delete(conn_id: crate::ConnectionId, ban_id: u32) -> u8 {
+    let connected = crate::session(conn_id)
+        .map(|state| state.lock().connected)
+        .unwrap_or(false);
+    if !connected || ban_id == 0 {
+        return 0;
+    }
+    queue_command(conn_id, Command::BanDelete { ban_id })
+}
+
+/// Requests the ban table; the engine emits `ban_list` events for it.
+#[no_mangle]
+pub extern "C" fn ts_list_bans(conn_id: crate::ConnectionId) -> u8 {
+    let connected = crate::session(conn_id)
+        .map(|state| state.lock().connected)
+        .unwrap_or(false);
+    if !connected {
+        return 0;
+    }
+    queue_command(conn_id, Command::ListBans)
+}
+
+/// Subscribes the client to one channel (start hearing it).
+#[no_mangle]
+pub extern "C" fn ts_subscribe_channel(conn_id: crate::ConnectionId, channel_id: u64) -> u8 {
+    let connected = crate::session(conn_id)
+        .map(|state| state.lock().connected)
+        .unwrap_or(false);
+    if !connected || channel_id == 0 {
+        return 0;
+    }
+    queue_command(
+        conn_id,
+        Command::SubscribeChannel {
+            channel_id,
+            unsubscribe: false,
+        },
+    )
+}
+
+/// Unsubscribes the client from one channel (stop hearing it).
+#[no_mangle]
+pub extern "C" fn ts_unsubscribe_channel(conn_id: crate::ConnectionId, channel_id: u64) -> u8 {
+    let connected = crate::session(conn_id)
+        .map(|state| state.lock().connected)
+        .unwrap_or(false);
+    if !connected || channel_id == 0 {
+        return 0;
+    }
+    queue_command(
+        conn_id,
+        Command::SubscribeChannel {
+            channel_id,
+            unsubscribe: true,
+        },
+    )
+}
+
+/// Requests a channel's description (`channeldescription`); the engine emits a
+/// `channel_description` event carrying the text.
+#[no_mangle]
+pub extern "C" fn ts_channel_description(conn_id: crate::ConnectionId, channel_id: u64) -> u8 {
+    let connected = crate::session(conn_id)
+        .map(|state| state.lock().connected)
+        .unwrap_or(false);
+    if !connected || channel_id == 0 {
+        return 0;
+    }
+    queue_command(conn_id, Command::ChannelDescription { channel_id })
+}
+
+/// Adds a client to a server group (`servergroupaddclient`).
+#[no_mangle]
+pub extern "C" fn ts_add_client_to_group(
+    conn_id: crate::ConnectionId,
+    client_id: u16,
+    group_id: u64,
+) -> u8 {
+    let connected = crate::session(conn_id)
+        .map(|state| state.lock().connected)
+        .unwrap_or(false);
+    if !connected || group_id == 0 {
+        return 0;
+    }
+    // Resolve the client's database id (needed by servergroupaddclient).
+    let db_id = crate::session(conn_id)
+        .and_then(|state| {
+            let guard = state.lock();
+            guard
+                .clients
+                .iter()
+                .find(|c| c.id as u16 == client_id)
+                .map(|c| c.database_id)
+        })
+        .unwrap_or(0);
+    if db_id == 0 {
+        return 0;
+    }
+    queue_command(conn_id, Command::AddClientToGroup { db_id, group_id })
+}
+
+/// Removes a client from a server group (`servergroupdelclient`).
+#[no_mangle]
+pub extern "C" fn ts_remove_client_from_group(
+    conn_id: crate::ConnectionId,
+    client_id: u16,
+    group_id: u64,
+) -> u8 {
+    let connected = crate::session(conn_id)
+        .map(|state| state.lock().connected)
+        .unwrap_or(false);
+    if !connected || group_id == 0 {
+        return 0;
+    }
+    let db_id = crate::session(conn_id)
+        .and_then(|state| {
+            let guard = state.lock();
+            guard
+                .clients
+                .iter()
+                .find(|c| c.id as u16 == client_id)
+                .map(|c| c.database_id)
+        })
+        .unwrap_or(0);
+    if db_id == 0 {
+        return 0;
+    }
+    queue_command(conn_id, Command::RemoveClientFromGroup { db_id, group_id })
+}
+
+/// Files a complaint against a client (`complainadd`).
+#[no_mangle]
+pub extern "C" fn ts_complain_add(
+    conn_id: crate::ConnectionId,
+    client_id: u16,
+    message: *const c_char,
+) -> u8 {
+    if message.is_null() {
+        return 0;
+    }
+    let connected = crate::session(conn_id)
+        .map(|state| state.lock().connected)
+        .unwrap_or(false);
+    if !connected {
+        return 0;
+    }
+    let db_id = crate::session(conn_id)
+        .and_then(|state| {
+            let guard = state.lock();
+            guard
+                .clients
+                .iter()
+                .find(|c| c.id as u16 == client_id)
+                .map(|c| c.database_id)
+        })
+        .unwrap_or(0);
+    if db_id == 0 {
+        return 0;
+    }
+    let Some(text) = optional_reason(message) else {
+        return 0;
+    };
+    queue_command(
+        conn_id,
+        Command::ComplainAdd {
+            db_id,
+            message: text,
         },
     )
 }
