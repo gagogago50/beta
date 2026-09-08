@@ -1843,6 +1843,22 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
     }
   }
 
+  /// Force-sets (or clears) a client's server "talker" flag.
+  void setTalker(int cid, int clientId, bool talkPowerGranted) {
+    if (!_stateOf(cid).connected) return;
+    if (!TsNative.setTalker(cid, clientId, talkPowerGranted)) {
+      _setSession(
+        cid,
+        _stateOf(
+          cid,
+        ).copyWith(error: 'Unable to change the client talk status'),
+      );
+      return;
+    }
+    // The roster will refresh via `client_updated` from the server.
+    refreshRoster(cid);
+  }
+
   void pokeClient(int cid, int clientId, String message) {
     if (!_stateOf(cid).connected || message.trim().isEmpty) return;
     if (!TsNative.pokeClient(cid, clientId, message.trim())) {
@@ -3156,6 +3172,8 @@ class TsConnectionNotifier {
       _controller.removeClientFromGroup(connectionId, clientId, groupId);
   void complainAdd(int clientId, String message) =>
       _controller.complainAdd(connectionId, clientId, message);
+  void setTalker(int clientId, bool talkPowerGranted) =>
+      _controller.setTalker(connectionId, clientId, talkPowerGranted);
   void pokeClient(int clientId, String message) =>
       _controller.pokeClient(connectionId, clientId, message);
   void moveClient(int clientId, int channelId, {String? password}) =>

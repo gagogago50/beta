@@ -452,3 +452,12 @@ Résumé (voir `docs/PHASE-29-ADMIN-CLIENTS-CANAUX.md`).
 - `TsEvent::NetworkStats` enrichi : `bytes_in/out`, `packets_in/out`, `bandwidth_in/out`.
   À partir de `ConnectionStats.total_bytes/total_packets` (par `PacketStat`) et
   `last_second_bytes` (somme des slots). Affiche dans le menu Outils.
+
+## 25. Phase 31 — « faire taire » (SetTalker / client_is_talker)
+
+- Commande `SetTalker { client_id, talk_power_granted }` → `OutClientEditPart
+  { client_id, description: None, talk_power_granted: Some(bool) }` (`clientedit clid
+  client_is_talker=`). Équivalent SDK `requestClientSetIsTalker`.
+- FFI `ts_set_talker` ; action `setTalker` (refresh roster via `client_updated`) ;
+  entrée « Make silent / Allow to talk » (inverse `talkPowerGranted`) dans le menu modération.
+- cargo check+clippy OK ; flutter analyze 0 ; 146 tests.

@@ -2173,6 +2173,19 @@ async fn event_loop(
                     };
                     let _ = OutComplainAddMessage::new(&mut std::iter::once(part)).send(&mut con);
                 }
+                Command::SetTalker {
+                    client_id,
+                    talk_power_granted,
+                } => {
+                    // `clientedit clid client_is_talker=…` — forces a client's
+                    // server-side talk flag (the "make them silent" action).
+                    let part = OutClientEditPart {
+                        client_id: ClientId(client_id),
+                        description: None,
+                        talk_power_granted: Some(talk_power_granted),
+                    };
+                    let _ = OutClientEditMessage::new(&mut std::iter::once(part)).send(&mut con);
+                }
                 Command::PokeClient { client_id, message } => {
                     let part = OutClientPokeRequestPart {
                         client_id: ClientId(client_id),
@@ -4212,6 +4225,38 @@ pub extern "C" fn ts_complain_add(
         Command::ComplainAdd {
             db_id,
             message: text,
+        },
+    )
+}
+
+/// Force-sets (or clears) a client's server "talker" flag (`clientedit
+/// client_is_talker`) — the admin "make them silent" action.
+#[no_mangle]
+pub extern "C" fn ts_set_talker(
+    conn_id: crate::ConnectionId,
+    client_id: u16,
+    talk_power_granted: u8,
+) -> u8 {
+    if client_id == 0 {
+        return 0;
+    }
+    let connected = crate::session(conn_id)
+        .map(|state| state.lock().connected)
+        .unwrap_or(false);
+    if !connected {
+        return 0;
+    }
+    let own = crate::session(conn_id)
+        .map(|state| state.lock().own_client_id)
+        .unwrap_or(0);
+    if client_id as u32 == own {
+        return 0;
+    }
+    queue_command(
+        conn_id,
+        Command::SetTalker {
+            client_id,
+            talk_power_granted: talk_power_granted != 0,
         },
     )
 }

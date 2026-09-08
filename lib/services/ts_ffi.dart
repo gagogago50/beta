@@ -193,6 +193,10 @@ typedef _RemoveFromGroupDart = int Function(int, int, int);
 // ts_complain_add(connection_id, client_id, message) -> bool
 typedef _ComplainAddNative = Uint8 Function(Uint64, Uint16, Pointer<Utf8>);
 typedef _ComplainAddDart = int Function(int, int, Pointer<Utf8>);
+
+// ts_set_talker(connection_id, client_id, talk_power_granted) -> bool
+typedef _SetTalkerNative = Uint8 Function(Uint64, Uint16, Uint8);
+typedef _SetTalkerDart = int Function(int, int, int);
 typedef _BanClientDart = int Function(int, int, int, Pointer<Utf8>);
 
 // ts_poke_client(connection_id, client_id, message) -> bool
@@ -498,6 +502,9 @@ final _removeFromGroup = _lib
     );
 final _complainAdd = _lib.lookupFunction<_ComplainAddNative, _ComplainAddDart>(
   'ts_complain_add',
+);
+final _setTalker = _lib.lookupFunction<_SetTalkerNative, _SetTalkerDart>(
+  'ts_set_talker',
 );
 final _pokeClient = _lib.lookupFunction<_PokeClientNative, _PokeClientDart>(
   'ts_poke_client',
@@ -962,6 +969,12 @@ class TsNative {
     } finally {
       _freeInputString(ptr);
     }
+  }
+
+  /// Force-sets (or clears) a client's server "talker" flag — the admin
+  /// "make them silent" action (`clientedit client_is_talker`).
+  static bool setTalker(int connectionId, int clientId, bool talkPowerGranted) {
+    return _setTalker(connectionId, clientId, talkPowerGranted ? 1 : 0) != 0;
   }
 
   static bool pokeClient(int connectionId, int clientId, String message) {

@@ -113,6 +113,13 @@ pub enum Command {
         db_id: u64,
         message: String,
     },
+    /// Force-set (or clear) a client's "server talker" flag (`clientedit
+    /// client_is_talker`). This is the protocol equivalent of the SDK's
+    /// `requestClientSetIsTalker`: an admin "mutes" a client server-side.
+    SetTalker {
+        client_id: u16,
+        talk_power_granted: bool,
+    },
     /// Starts a file download (`ftinitdownload`). The engine answers with a
     /// `file_transfer` event once the TCP transfer finished or failed.
     DownloadFile {
@@ -253,7 +260,8 @@ impl Command {
             | Command::BanDelete { .. }
             | Command::AddClientToGroup { .. }
             | Command::RemoveClientFromGroup { .. }
-            | Command::ComplainAdd { .. } => 2.0,
+            | Command::ComplainAdd { .. }
+            | Command::SetTalker { .. } => 2.0,
             // Cheap control commands (subscriptions, list, description).
             Command::ListBans
             | Command::SubscribeChannel { .. }
@@ -311,6 +319,7 @@ impl Command {
                     Command::SubscribeChannel { .. }
                 )
                 | (Command::ListBans, Command::ListBans)
+                | (Command::SetTalker { .. }, Command::SetTalker { .. })
         )
     }
 }

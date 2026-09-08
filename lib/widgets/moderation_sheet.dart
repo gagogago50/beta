@@ -99,6 +99,18 @@ class ModerationSheet extends StatelessWidget {
         color: context.ts.warning,
         onTap: () => _complain(context),
       ),
+      _action(
+        context,
+        icon: Icons.voice_over_off,
+        label: client.talkPowerGranted ? 'Make silent' : 'Allow to talk',
+        color: context.ts.dangerAccent,
+        onTap: () {
+          Navigator.of(context).pop();
+          // Invert: if they can currently talk, mute them (talk_power=false);
+          // otherwise re-allow (talk_power=true).
+          notifier.setTalker(client.id, !client.talkPowerGranted);
+        },
+      ),
       if (client.serverGroupIds.isNotEmpty)
         _action(
           context,
