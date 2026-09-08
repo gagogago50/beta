@@ -1043,7 +1043,7 @@ class _SessionTabState extends ConsumerState<_SessionTab> {
                 style: TextStyle(color: context.ts.textPrimary, fontSize: 14),
               ),
               subtitle: Text(
-                '${conn.rttMs} ms · ${conn.jitterMs} ms · ${conn.packetLossPercent.toStringAsFixed(1)}%',
+                '${conn.rttMs} ms · ${conn.jitterMs} ms · ${conn.packetLossPercent.toStringAsFixed(1)}% · ↓${conn.bandwidthIn} B/s · ↑${conn.bandwidthOut} B/s',
                 style: TextStyle(color: context.ts.textSecondary, fontSize: 12),
               ),
               onTap: () => Navigator.pop(ctx),

@@ -82,6 +82,14 @@ class TsConnectionState {
   /// Inter-arrival jitter computed by the engine from consecutive RTT samples.
   final int jitterMs;
   final double packetLossPercent;
+
+  /// Server connection stats: total bytes / packets and current bandwidth.
+  final int bytesIn;
+  final int bytesOut;
+  final int packetsIn;
+  final int packetsOut;
+  final int bandwidthIn;
+  final int bandwidthOut;
   final List<String> diagMessages;
 
   /// Live file transfers (uploads and downloads) for this session.
@@ -220,6 +228,12 @@ class TsConnectionState {
     this.rttDeviationMs = 0,
     this.jitterMs = 0,
     this.packetLossPercent = 0.0,
+    this.bytesIn = 0,
+    this.bytesOut = 0,
+    this.packetsIn = 0,
+    this.packetsOut = 0,
+    this.bandwidthIn = 0,
+    this.bandwidthOut = 0,
     this.diagMessages = const [],
     this.transfers = const [],
     this.serverFiles = const [],
@@ -296,6 +310,12 @@ class TsConnectionState {
     int? rttDeviationMs,
     int? jitterMs,
     double? packetLossPercent,
+    int? bytesIn,
+    int? bytesOut,
+    int? packetsIn,
+    int? packetsOut,
+    int? bandwidthIn,
+    int? bandwidthOut,
     List<String>? diagMessages,
     List<FileTransfer>? transfers,
     List<ServerFile>? serverFiles,
@@ -375,6 +395,12 @@ class TsConnectionState {
     rttDeviationMs: rttDeviationMs ?? this.rttDeviationMs,
     jitterMs: jitterMs ?? this.jitterMs,
     packetLossPercent: packetLossPercent ?? this.packetLossPercent,
+    bytesIn: bytesIn ?? this.bytesIn,
+    bytesOut: bytesOut ?? this.bytesOut,
+    packetsIn: packetsIn ?? this.packetsIn,
+    packetsOut: packetsOut ?? this.packetsOut,
+    bandwidthIn: bandwidthIn ?? this.bandwidthIn,
+    bandwidthOut: bandwidthOut ?? this.bandwidthOut,
     diagMessages: diagMessages ?? this.diagMessages,
     transfers: transfers ?? this.transfers,
     serverFiles: serverFiles ?? this.serverFiles,
@@ -1223,6 +1249,12 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
             jitterMs: data['jitter_ms'] as int? ?? 0,
             packetLossPercent:
                 (data['packet_loss_percent'] as num?)?.toDouble() ?? 0.0,
+            bytesIn: data['bytes_in'] as int? ?? 0,
+            bytesOut: data['bytes_out'] as int? ?? 0,
+            packetsIn: data['packets_in'] as int? ?? 0,
+            packetsOut: data['packets_out'] as int? ?? 0,
+            bandwidthIn: data['bandwidth_in'] as int? ?? 0,
+            bandwidthOut: data['bandwidth_out'] as int? ?? 0,
           ),
         );
         break;

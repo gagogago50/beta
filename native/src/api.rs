@@ -17,7 +17,7 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 use tsclientlib::messages::c2s::*;
 use tsclientlib::Reason;
-use tsclientlib::{ChannelId, ClientDbId, ClientId, ServerGroupId, UidBuf};
+use tsclientlib::{ChannelId, ClientDbId, ClientId, PacketStat, ServerGroupId, UidBuf};
 use tsclientlib::{Connection, DisconnectOptions, Identity, OutCommandExt, StreamItem};
 use tsproto_packets::packets::{AudioData, CodecType, InAudioBuf, OutAudio};
 
@@ -1720,6 +1720,49 @@ fn handle_control_item(conn_id: crate::ConnectionId, item: StreamItem, con: &mut
                     } else {
                         0
                     };
+                    // Aggregate per-kind counters into inbound / outbound totals
+                    // and the current (last-second) bandwidth. `PacketStat` is
+                    // a 6-variant enum indexed by `as usize` (see tsproto
+                    // resend.rs); the variants are ordered In{Control,Keepalive,
+                    // Speech} then Out{...}.
+                    let in_kinds = [
+                        PacketStat::InControl,
+                        PacketStat::InKeepalive,
+                        PacketStat::InSpeech,
+                    ];
+                    let out_kinds = [
+                        PacketStat::OutControl,
+                        PacketStat::OutKeepalive,
+                        PacketStat::OutSpeech,
+                    ];
+                    let bytes_in: u64 = in_kinds
+                        .iter()
+                        .map(|k| stats.total_bytes[*k as usize])
+                        .sum();
+                    let bytes_out: u64 = out_kinds
+                        .iter()
+                        .map(|k| stats.total_bytes[*k as usize])
+                        .sum();
+                    let packets_in: u64 = in_kinds
+                        .iter()
+                        .map(|k| stats.total_packets[*k as usize])
+                        .sum();
+                    let packets_out: u64 = out_kinds
+                        .iter()
+                        .map(|k| stats.total_packets[*k as usize])
+                        .sum();
+                    // last_second_bytes is [[u32;6];60] (one slot per second for
+                    // 60 s); sum every slot's contribution for the in/out kinds.
+                    let bandwidth_in: u64 = stats
+                        .last_second_bytes
+                        .iter()
+                        .flat_map(|slot| in_kinds.iter().map(move |k| slot[*k as usize] as u64))
+                        .sum();
+                    let bandwidth_out: u64 = stats
+                        .last_second_bytes
+                        .iter()
+                        .flat_map(|slot| out_kinds.iter().map(move |k| slot[*k as usize] as u64))
+                        .sum();
                     push_event(
                         conn_id,
                         TsEvent::NetworkStats {
@@ -1727,6 +1770,12 @@ fn handle_control_item(conn_id: crate::ConnectionId, item: StreamItem, con: &mut
                             rtt_deviation_ms: rtt_dev_ms,
                             jitter_ms: emit,
                             packet_loss_percent: stats.get_packetloss() * 100.0,
+                            bytes_in,
+                            bytes_out,
+                            packets_in,
+                            packets_out,
+                            bandwidth_in,
+                            bandwidth_out,
                         },
                     );
                 }

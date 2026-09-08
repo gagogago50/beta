@@ -440,3 +440,15 @@ Résumé (voir `docs/PHASE-29-ADMIN-CLIENTS-CANAUX.md`).
 
 > **Reste** : M7 (liste des permissions), Lot B (PTT clavier + forcé), Lot C (stats,
 > états de parole).
+
+## 24. Phase 30 — stats serveur complètes (Lot C2) + PTT forcé (Lot B2)
+
+### PTT forcé (B2)
+- `TsConnectionState.forcedPtt` : vrai si le canal exige plus de talk power qu'on n'en a
+  (et pas d'accord explicite). Si forcé, `_shouldMicBeActive` ne retourne vrai que pendant
+  l'appui de PTT. Le legacy force `INPUT_DEACTIVATED=1` + `vad=false` + `voiceactivation_level=-50`.
+
+### Stats serveur (C2)
+- `TsEvent::NetworkStats` enrichi : `bytes_in/out`, `packets_in/out`, `bandwidth_in/out`.
+  À partir de `ConnectionStats.total_bytes/total_packets` (par `PacketStat`) et
+  `last_second_bytes` (somme des slots). Affiche dans le menu Outils.

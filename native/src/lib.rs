@@ -665,6 +665,15 @@ pub enum TsEvent {
         /// samples (the mean absolute difference between successive RTTs).
         jitter_ms: u64,
         packet_loss_percent: f32,
+        /// Total bytes received / sent since the connection started.
+        bytes_in: u64,
+        bytes_out: u64,
+        /// Total packets received / sent, across all types.
+        packets_in: u64,
+        packets_out: u64,
+        /// Current bandwidth (bytes/s) of the last second, inbound and outbound.
+        bandwidth_in: u64,
+        bandwidth_out: u64,
     },
     /// Explicit connection phase transition. Mirrors the state machine the
     /// desktop client shows in its status bar: resolving → connecting →
