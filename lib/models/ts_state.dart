@@ -473,6 +473,13 @@ class TsConnectionState {
     if (self == null) return false;
     return self.talkPowerGranted || self.talkPower >= channel.neededTalkPower;
   }
+
+  /// The server only lets us talk when the channel's talk-power requirement is
+  /// met (or we were explicitly granted it). When it is NOT met, the desktop
+  /// client forces push-to-talk so background voice is not sent while muted —
+  /// that is what `forcedPtt` flags. The UI uses it to disable VAD/auto-mic and
+  /// require a deliberate press of the PTT button.
+  bool get forcedPtt => currentChannel != null && !canTalkInCurrentChannel;
 }
 
 const _sentinel = Object();
@@ -2912,6 +2919,9 @@ class MultiServerNotifier extends Notifier<MultiServerState> {
     final cid = _micConnectionId;
     if (cid == 0) return false;
     final st = _stateOf(cid);
+    // When the server forces push-to-talk (the channel requires more talk
+    // power than we hold), the mic only opens while the PTT button is held.
+    if (st.forcedPtt) return st.pttPressed;
     if (st.pttMode) return st.pttPressed;
     return !st.inputMuted;
   }

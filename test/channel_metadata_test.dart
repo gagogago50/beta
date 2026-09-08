@@ -100,4 +100,48 @@ void main() {
       expect(st.canTalkInCurrentChannel, isTrue);
     });
   });
+
+  group('forcedPtt (talk-power gating)', () {
+    TsConnectionState forced({
+      required int needed,
+      required int power,
+      required bool grant,
+    }) {
+      return TsConnectionState(
+        connectionId: 1,
+        connected: true,
+        ownClientId: 10,
+        selectedChannelId: 2,
+        channels: [
+          const TsChannel(id: 1, name: 'A', parentId: 0),
+          TsChannel(id: 2, name: 'B', parentId: 0, neededTalkPower: needed),
+        ],
+        clients: [
+          TsClient(
+            id: 10,
+            nickname: 'me',
+            channelId: 2,
+            talkPower: power,
+            talkPowerGranted: grant,
+          ),
+        ],
+      );
+    }
+
+    test('is false when the channel imposes no talk-power requirement', () {
+      expect(forced(needed: 0, power: 0, grant: false).forcedPtt, isFalse);
+    });
+
+    test('is true when we lack the required talk power', () {
+      expect(forced(needed: 50, power: 10, grant: false).forcedPtt, isTrue);
+    });
+
+    test('is false when we hold enough talk power', () {
+      expect(forced(needed: 50, power: 60, grant: false).forcedPtt, isFalse);
+    });
+
+    test('is false when the server explicitly granted us talk power', () {
+      expect(forced(needed: 60, power: 0, grant: true).forcedPtt, isFalse);
+    });
+  });
 }
