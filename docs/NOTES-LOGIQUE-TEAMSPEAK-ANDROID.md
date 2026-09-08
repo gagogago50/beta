@@ -417,3 +417,26 @@ Résumé (voir `docs/PHASE-28-ZERO-ALLOC-AUDIO.md`).
 
 > **Reste** : JNI direct PCM 16 bits (contourner l'EventChannel), TSDNS multi-endpoints +
 > `androidId`, validation appareil.
+
+## 23. Phase 29 — administration de clients/canaux (Lot A)
+
+Résumé (voir `docs/PHASE-29-ADMIN-CLIENTS-CANAUX.md`).
+
+### Nouveau (moteur + UI)
+- Ban par UID / adresse (`banadd`), table des bans (`banlist` + `bandel`).
+- Subscribe/unsubscribe d'un canal (`channelsubscribe/unsubscribe`).
+- Description du canal (`channeldescription` → `OptionalChannelData.description`).
+- Ajouter/retirer un groupe serveur (`servergroupaddclient`/`delclient` via `client_db_id`).
+- Plainte (`complainadd` → `InMessage::ComplainList`).
+- `TsClient.database_id` (du livre `client.database_id: ClientDbId`).
+- Événements : `ban_list`, `complain_list`, `channel_description`, `client_updated`.
+
+### Décisions
+- `ban_dbid`/`isTalker`/mot de passe temporaire = SDK-only (pas de part protocole publique).
+- Décodeur UID base64 intégré (sans dépendance).
+
+### Tests / qualité
+- `cargo clippy -D warnings` : OK ; `flutter analyze` : 0 ; 142 tests ; CI Rust verte.
+
+> **Reste** : M7 (liste des permissions), Lot B (PTT clavier + forcé), Lot C (stats,
+> états de parole).
