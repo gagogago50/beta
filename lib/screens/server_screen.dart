@@ -1021,6 +1021,22 @@ class _SessionTabState extends ConsumerState<_SessionTab> {
               },
             ),
             ListTile(
+              leading: Icon(Icons.gavel, color: context.ts.dangerAccent),
+              title: Text(
+                'Ban table',
+                style: TextStyle(color: context.ts.textPrimary, fontSize: 14),
+              ),
+              subtitle: Text(
+                '${conn.bans.length} ban(s)',
+                style: TextStyle(color: context.ts.textSecondary, fontSize: 12),
+              ),
+              onTap: () {
+                Navigator.pop(ctx);
+                notifier.listBans();
+                _showBanTable(conn, notifier);
+              },
+            ),
+            ListTile(
               leading: Icon(Icons.network_check, color: context.ts.accent),
               title: Text(
                 al.networkStats,
@@ -1091,6 +1107,14 @@ class _SessionTabState extends ConsumerState<_SessionTab> {
     );
   }
 
+  /// Opens the ban-table dialog. The list refreshes as `ban_list` events land.
+  void _showBanTable(TsConnectionState conn, TsConnectionNotifier notifier) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => _BanTableDialog(connectionId: widget.connectionId),
+    );
+  }
+
   /// Prompts for a privilege key (permission token) and sends it to the server.
   /// The `token_used` event shows a confirmation in a snack bar.
   Future<void> _promptPrivilegeKey(
@@ -1126,6 +1150,22 @@ class _SessionTabState extends ConsumerState<_SessionTab> {
     controller.dispose();
     if (token == null || token.isEmpty) return;
     notifier.useToken(token);
+  }
+
+  /// Requests a channel's description and shows it in a dialog once the
+  /// `channel_description` event lands (the state is watched reactively).
+  void _showChannelDescriptionAfterFetch(
+    TsConnectionState conn,
+    TsConnectionNotifier notifier,
+    int channelId,
+  ) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => _ChannelDescriptionDialog(
+        connectionId: widget.connectionId,
+        channelId: channelId,
+      ),
+    );
   }
 
   /// Displays the currently selected channel's topic / description.
@@ -1417,6 +1457,45 @@ class _SessionTabState extends ConsumerState<_SessionTab> {
               onTap: () {
                 Navigator.pop(ctx);
                 _moveChannelDialog(conn, notifier, channelId);
+              },
+            ),
+            ListTile(
+              leading: Icon(
+                conn.subscribedChannels.contains(channelId)
+                    ? Icons.volume_off
+                    : Icons.volume_up,
+                color: context.ts.accent,
+              ),
+              title: Text(
+                conn.subscribedChannels.contains(channelId)
+                    ? 'Unsubscribe'
+                    : 'Subscribe',
+                style: TextStyle(color: context.ts.textPrimary, fontSize: 14),
+              ),
+              onTap: () {
+                Navigator.pop(ctx);
+                if (conn.subscribedChannels.contains(channelId)) {
+                  notifier.unsubscribeChannel(channelId);
+                } else {
+                  notifier.subscribeChannel(channelId);
+                }
+              },
+            ),
+            ListTile(
+              leading: Icon(
+                Icons.description_outlined,
+                color: context.ts.accent,
+              ),
+              title: Text(
+                'Channel description',
+                style: TextStyle(color: context.ts.textPrimary, fontSize: 14),
+              ),
+              onTap: () {
+                Navigator.pop(ctx);
+                notifier.requestChannelDescription(channelId);
+                // The description arrives via a `channel_description` event;
+                // open the info dialog so it can render.
+                _showChannelDescriptionAfterFetch(conn, notifier, channelId);
               },
             ),
             Divider(height: 1, color: context.ts.divider),
@@ -2960,6 +3039,117 @@ class _GlobalSearchSheetState extends ConsumerState<_GlobalSearchSheet> {
           ),
         );
       },
+    );
+  }
+}
+
+/// Shows a channel's description, updating reactively when the
+/// `channel_description` event arrives.
+class _ChannelDescriptionDialog extends ConsumerWidget {
+  final int connectionId;
+  final int channelId;
+
+  const _ChannelDescriptionDialog({
+    required this.connectionId,
+    required this.channelId,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final st = ref.watch(
+      tsSessionProvider(connectionId).select((s) => s.state),
+    );
+    final description = st.channelDescription;
+    return AlertDialog(
+      backgroundColor: context.ts.card,
+      title: const Text('Channel description'),
+      content: SingleChildScrollView(
+        child: Text(
+          (description?.isNotEmpty ?? false)
+              ? description!
+              : 'No description yet.',
+          style: TextStyle(color: context.ts.textSecondary),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(AppLocalizations.of(context).close),
+        ),
+      ],
+    );
+  }
+}
+
+/// Shows the server ban table, updating reactively as `ban_list` events land.
+/// Each ban can be deleted from here.
+class _BanTableDialog extends ConsumerWidget {
+  final int connectionId;
+
+  const _BanTableDialog({required this.connectionId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final st = ref.watch(
+      tsSessionProvider(connectionId).select((s) => s.state),
+    );
+    final notifier = ref
+        .read(tsMultiServerProvider.notifier)
+        .controllerFor(connectionId);
+    final bans = st.bans;
+    return AlertDialog(
+      backgroundColor: context.ts.card,
+      title: const Text('Ban table'),
+      content: SizedBox(
+        width: double.maxFinite,
+        height: 360,
+        child: bans.isEmpty
+            ? Center(
+                child: Text(
+                  'No bans.',
+                  style: TextStyle(color: context.ts.textSecondary),
+                ),
+              )
+            : ListView.builder(
+                itemCount: bans.length,
+                itemBuilder: (context, index) {
+                  final ban = bans[index];
+                  return ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.gavel, size: 18),
+                    title: Text(
+                      ban.label,
+                      style: TextStyle(
+                        color: context.ts.textPrimary,
+                        fontSize: 13,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: Text(
+                      '${ban.durationLabel} · by ${ban.invokerName}',
+                      style: TextStyle(
+                        color: context.ts.textSecondary,
+                        fontSize: 11,
+                      ),
+                    ),
+                    trailing: IconButton(
+                      icon: Icon(
+                        Icons.delete_outline,
+                        color: context.ts.danger,
+                      ),
+                      tooltip: 'Delete ban',
+                      onPressed: () => notifier.banDelete(ban.banId),
+                    ),
+                  );
+                },
+              ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(AppLocalizations.of(context).close),
+        ),
+      ],
     );
   }
 }

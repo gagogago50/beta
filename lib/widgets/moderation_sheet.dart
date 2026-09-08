@@ -83,6 +83,29 @@ class ModerationSheet extends StatelessWidget {
           color: context.ts.dangerAccent,
           onTap: () => _ban(context),
         ),
+      // Extra admin actions, always visible for server admins (these do not
+      // depend on per-target permission hints, only on being connected).
+      _action(
+        context,
+        icon: Icons.vpn_key,
+        label: 'Ban by UID',
+        color: context.ts.dangerAccent,
+        onTap: () => _banByUid(context),
+      ),
+      _action(
+        context,
+        icon: Icons.flag_outlined,
+        label: 'File a complaint',
+        color: context.ts.warning,
+        onTap: () => _complain(context),
+      ),
+      if (client.serverGroupIds.isNotEmpty)
+        _action(
+          context,
+          icon: Icons.groups,
+          label: 'Server groups',
+          onTap: () => _manageGroups(context),
+        ),
     ];
 
     return SafeArea(
@@ -172,6 +195,48 @@ class ModerationSheet extends StatelessWidget {
           SnackBar(content: Text('${al.banClient}: ${client.nickname}')),
         );
     }
+  }
+
+  /// Bans the client's persistent UID (valid across every server they use).
+  Future<void> _banByUid(BuildContext context) async {
+    final result = await showDialog<_BanRequest>(
+      context: context,
+      builder: (ctx) => _BanDialog(nickname: client.nickname),
+    );
+    if (result == null) return;
+    notifier.banUid(
+      client.uid ?? '',
+      seconds: result.seconds,
+      reason: result.reason,
+    );
+    if (context.mounted) {
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('Ban by UID sent')));
+    }
+  }
+
+  /// Files a complaint against the client.
+  Future<void> _complain(BuildContext context) async {
+    final al = AppLocalizations.of(context);
+    final message = await _promptText(context, 'Complaint', al.send);
+    if (message == null || message.isEmpty) return;
+    notifier.complainAdd(client.id, message);
+    if (context.mounted) Navigator.of(context).pop();
+  }
+
+  /// Lets an admin add/remove this client from its server groups.
+  Future<void> _manageGroups(BuildContext context) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.ts.surface,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+      ),
+      builder: (ctx) => _GroupManager(client: client, notifier: notifier),
+    );
   }
 
   Future<String?> _promptText(
@@ -315,5 +380,106 @@ class _BanDialogState extends State<_BanDialog> {
         ),
       ],
     );
+  }
+}
+
+/// Admin: add/remove a client from its server groups.
+///
+/// The engine exposes the client's current group ids; an admin can pop one of
+/// them and type a new group id to assign. This mirrors the desktop client's
+/// "Server groups" dialog without needing a full group list (the server may
+/// not expose it to every client).
+class _GroupManager extends StatelessWidget {
+  final TsClient client;
+  final TsConnectionNotifier notifier;
+
+  const _GroupManager({required this.client, required this.notifier});
+
+  @override
+  Widget build(BuildContext context) {
+    final al = AppLocalizations.of(context);
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Server groups · ${client.nickname}',
+              style: TextStyle(
+                color: context.ts.textPrimary,
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            for (final groupId in client.serverGroupIds)
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.group, size: 18),
+                title: Text(
+                  'Group $groupId',
+                  style: TextStyle(color: context.ts.textPrimary),
+                ),
+                trailing: IconButton(
+                  icon: Icon(
+                    Icons.remove_circle_outline,
+                    color: context.ts.danger,
+                  ),
+                  tooltip: 'Remove',
+                  onPressed: () =>
+                      notifier.removeClientFromGroup(client.id, groupId),
+                ),
+              ),
+            const SizedBox(height: 8),
+            FilledButton.tonalIcon(
+              onPressed: () => _addGroup(context),
+              icon: const Icon(Icons.add),
+              label: const Text('Assign group by ID'),
+            ),
+            const SizedBox(height: 4),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text(al.close),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _addGroup(BuildContext context) async {
+    final controller = TextEditingController();
+    final groupId = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.ts.card,
+        title: const Text('Assign server group'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          style: TextStyle(color: context.ts.textPrimary),
+          decoration: const InputDecoration(hintText: 'Server group id'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text(AppLocalizations.of(ctx).cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(
+              ctx,
+            ).pop(int.tryParse(controller.text.trim()) ?? 0),
+            child: Text('Assign'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (groupId != null && groupId > 0) {
+      notifier.addClientToGroup(client.id, groupId);
+    }
   }
 }
